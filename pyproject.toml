@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "universal-rpa-studio"
+version = "0.1.0"
+description = "Deterministic local Windows RPA Studio"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "PySide6>=6.8,<7",
+  "pydantic>=2.10,<3",
+  "pynput>=1.7.7,<2",
+  "pywinauto==0.6.9",
+  "pywin32>=308,<400",
+  "openpyxl>=3.1,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.14,<2",
+  "pytest>=8.3,<10",
+  "pytest-qt>=4.4,<5",
+  "ruff>=0.9,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+universal_rpa = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "windows_e2e: sends input to the deterministic Windows test harness",
+  "mis_pilot: requires the approved read-only MIS pilot environment",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+explicit_package_bases = true
+mypy_path = ["src"]
+packages = ["universal_rpa"]

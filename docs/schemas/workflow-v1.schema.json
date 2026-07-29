@@ -1,0 +1,1273 @@
+{
+  "$defs": {
+    "ActionStep": {
+      "additionalProperties": false,
+      "properties": {
+        "action_type": {
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+          "title": "Action Type",
+          "type": "string"
+        },
+        "assertions": {
+          "default": [],
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AssertionSpec"
+              },
+              {
+                "$ref": "#/$defs/TableAssertionSpec"
+              }
+            ]
+          },
+          "title": "Assertions",
+          "type": "array"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "failure_policy": {
+          "$ref": "#/$defs/FailurePolicy",
+          "default": {
+            "backoff_ms": 500,
+            "mode": "stop",
+            "retry_count": 0
+          }
+        },
+        "input_step_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Step Id"
+        },
+        "kind": {
+          "const": "action",
+          "default": "action",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "postcondition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaitSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "precondition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaitSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "step_id": {
+          "format": "uuid",
+          "title": "Step Id",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "value": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "literal": "#/$defs/LiteralValue",
+                  "row_binding": "#/$defs/RowBindingValue",
+                  "secret_ref": "#/$defs/SecretRefValue",
+                  "variable": "#/$defs/VariableValue"
+                },
+                "propertyName": "mode"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/LiteralValue"
+                },
+                {
+                  "$ref": "#/$defs/VariableValue"
+                },
+                {
+                  "$ref": "#/$defs/RowBindingValue"
+                },
+                {
+                  "$ref": "#/$defs/SecretRefValue"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "wait": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaitSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "step_id",
+        "label",
+        "action_type"
+      ],
+      "title": "ActionStep",
+      "type": "object"
+    },
+    "AssertionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion_type": {
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+          "title": "Assertion Type",
+          "type": "string"
+        },
+        "expected": {
+          "default": null
+        }
+      },
+      "required": [
+        "assertion_type"
+      ],
+      "title": "AssertionSpec",
+      "type": "object"
+    },
+    "ConditionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "condition_type": {
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+          "title": "Condition Type",
+          "type": "string"
+        },
+        "expected": {
+          "default": null
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "condition_type"
+      ],
+      "title": "ConditionSpec",
+      "type": "object"
+    },
+    "CredentialSource": {
+      "additionalProperties": false,
+      "properties": {
+        "credential_ref": {
+          "minLength": 1,
+          "title": "Credential Ref",
+          "type": "string"
+        },
+        "source_type": {
+          "const": "credential_ref",
+          "default": "credential_ref",
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "credential_ref"
+      ],
+      "title": "CredentialSource",
+      "type": "object"
+    },
+    "CsvDataSource": {
+      "additionalProperties": false,
+      "properties": {
+        "data_source_id": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Data Source Id",
+          "type": "string"
+        },
+        "encoding": {
+          "enum": [
+            "utf-8",
+            "utf-8-sig",
+            "cp949"
+          ],
+          "title": "Encoding",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/ProjectRelativePath"
+        },
+        "source_type": {
+          "const": "csv",
+          "default": "csv",
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_source_id",
+        "label",
+        "path",
+        "encoding"
+      ],
+      "title": "CsvDataSource",
+      "type": "object"
+    },
+    "DataCell": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "DataColumnSource": {
+      "additionalProperties": false,
+      "properties": {
+        "column_name": {
+          "minLength": 1,
+          "title": "Column Name",
+          "type": "string"
+        },
+        "data_source_id": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Data Source Id",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "source_type": {
+          "enum": [
+            "csv_column",
+            "xlsx_column"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_type",
+        "data_source_id",
+        "column_name"
+      ],
+      "title": "DataColumnSource",
+      "type": "object"
+    },
+    "DateExpression": {
+      "additionalProperties": false,
+      "properties": {
+        "days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Days"
+        },
+        "operand": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DateExpression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operation": {
+          "enum": [
+            "today",
+            "run_date",
+            "add_days",
+            "month_start",
+            "month_end"
+          ],
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "DateExpression",
+      "type": "object"
+    },
+    "DateRuleSource": {
+      "additionalProperties": false,
+      "properties": {
+        "expression": {
+          "$ref": "#/$defs/DateExpression"
+        },
+        "source_type": {
+          "const": "date_rule",
+          "default": "date_rule",
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression"
+      ],
+      "title": "DateRuleSource",
+      "type": "object"
+    },
+    "EnvironmentPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "coordinate_client_size_tolerance_percent": {
+          "const": 2,
+          "default": 2,
+          "title": "Coordinate Client Size Tolerance Percent",
+          "type": "integer"
+        },
+        "require_foreground_before_input": {
+          "const": true,
+          "default": true,
+          "title": "Require Foreground Before Input",
+          "type": "boolean"
+        },
+        "require_interactive_desktop": {
+          "const": true,
+          "default": true,
+          "title": "Require Interactive Desktop",
+          "type": "boolean"
+        }
+      },
+      "title": "EnvironmentPolicy",
+      "type": "object"
+    },
+    "FailurePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "backoff_ms": {
+          "default": 500,
+          "maximum": 60000,
+          "minimum": 0,
+          "title": "Backoff Ms",
+          "type": "integer"
+        },
+        "mode": {
+          "default": "stop",
+          "enum": [
+            "stop",
+            "retry",
+            "skip_iteration"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "retry_count": {
+          "default": 0,
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Retry Count",
+          "type": "integer"
+        }
+      },
+      "title": "FailurePolicy",
+      "type": "object"
+    },
+    "FixedDefaultSource": {
+      "additionalProperties": false,
+      "properties": {
+        "source_type": {
+          "const": "fixed_default",
+          "default": "fixed_default",
+          "title": "Source Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "FixedDefaultSource",
+      "type": "object"
+    },
+    "IfPresentStep": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/PresenceSpec"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "failure_policy": {
+          "$ref": "#/$defs/FailurePolicy",
+          "default": {
+            "backoff_ms": 500,
+            "mode": "stop",
+            "retry_count": 0
+          }
+        },
+        "kind": {
+          "const": "if_present",
+          "default": "if_present",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "step_id": {
+          "format": "uuid",
+          "title": "Step Id",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "action": "#/$defs/ActionStep",
+                "if_present": "#/$defs/IfPresentStep",
+                "loop": "#/$defs/LoopStep"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ActionStep"
+              },
+              {
+                "$ref": "#/$defs/LoopStep"
+              },
+              {
+                "$ref": "#/$defs/IfPresentStep"
+              }
+            ]
+          },
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "step_id",
+        "label",
+        "condition",
+        "steps"
+      ],
+      "title": "IfPresentStep",
+      "type": "object"
+    },
+    "InlineChoiceSource": {
+      "additionalProperties": false,
+      "properties": {
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Options",
+          "type": "array"
+        },
+        "source_type": {
+          "const": "inline_options",
+          "default": "inline_options",
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "options"
+      ],
+      "title": "InlineChoiceSource",
+      "type": "object"
+    },
+    "InlineDataSource": {
+      "additionalProperties": false,
+      "properties": {
+        "data_source_id": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Data Source Id",
+          "type": "string"
+        },
+        "headers": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Headers",
+          "type": "array"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/DataCell"
+            },
+            "type": "array"
+          },
+          "minItems": 1,
+          "title": "Rows",
+          "type": "array"
+        },
+        "source_type": {
+          "const": "inline",
+          "default": "inline",
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_source_id",
+        "label",
+        "headers",
+        "rows"
+      ],
+      "title": "InlineDataSource",
+      "type": "object"
+    },
+    "LiteralValue": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "literal",
+          "default": "literal",
+          "title": "Mode",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "LiteralValue",
+      "type": "object"
+    },
+    "LoopStep": {
+      "additionalProperties": false,
+      "properties": {
+        "data_source_id": {
+          "title": "Data Source Id",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "failure_policy": {
+          "$ref": "#/$defs/FailurePolicy",
+          "default": {
+            "backoff_ms": 500,
+            "mode": "stop",
+            "retry_count": 0
+          }
+        },
+        "kind": {
+          "const": "loop",
+          "default": "loop",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "step_id": {
+          "format": "uuid",
+          "title": "Step Id",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "action": "#/$defs/ActionStep",
+                "if_present": "#/$defs/IfPresentStep",
+                "loop": "#/$defs/LoopStep"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ActionStep"
+              },
+              {
+                "$ref": "#/$defs/LoopStep"
+              },
+              {
+                "$ref": "#/$defs/IfPresentStep"
+              }
+            ]
+          },
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "step_id",
+        "label",
+        "data_source_id",
+        "steps"
+      ],
+      "title": "LoopStep",
+      "type": "object"
+    },
+    "OutputPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_retention_days": {
+          "default": 30,
+          "maximum": 365,
+          "minimum": 1,
+          "title": "Artifact Retention Days",
+          "type": "integer"
+        },
+        "failure_screenshots": {
+          "default": true,
+          "title": "Failure Screenshots",
+          "type": "boolean"
+        }
+      },
+      "title": "OutputPolicy",
+      "type": "object"
+    },
+    "PresenceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "condition_type": {
+          "pattern": "^[a-z][a-z0-9_]*\\.(element_exists|window_exists)$",
+          "title": "Condition Type",
+          "type": "string"
+        },
+        "poll_interval_ms": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Poll Interval Ms",
+          "type": "integer"
+        },
+        "target": {
+          "$ref": "#/$defs/TargetSpec"
+        },
+        "timeout_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 86400000,
+          "title": "Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "condition_type",
+        "target",
+        "timeout_ms"
+      ],
+      "title": "PresenceSpec",
+      "type": "object"
+    },
+    "ProjectRelativePath": {
+      "title": "ProjectRelativePath",
+      "type": "string"
+    },
+    "RowBindingValue": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "row_binding",
+          "default": "row_binding",
+          "title": "Mode",
+          "type": "string"
+        },
+        "template": {
+          "pattern": "^\\{\\{ row\\.[A-Za-z_][A-Za-z0-9_]* \\}\\}$",
+          "title": "Template",
+          "type": "string"
+        }
+      },
+      "required": [
+        "template"
+      ],
+      "title": "RowBindingValue",
+      "type": "object"
+    },
+    "RunInputSource": {
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "source_type": {
+          "const": "run_input",
+          "default": "run_input",
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "title": "RunInputSource",
+      "type": "object"
+    },
+    "RunPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "max_iterations": {
+          "default": 1000,
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Max Iterations",
+          "type": "integer"
+        },
+        "max_runtime_seconds": {
+          "default": 7200,
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Max Runtime Seconds",
+          "type": "integer"
+        }
+      },
+      "title": "RunPolicy",
+      "type": "object"
+    },
+    "SecretRefValue": {
+      "additionalProperties": false,
+      "properties": {
+        "credential_ref": {
+          "minLength": 1,
+          "title": "Credential Ref",
+          "type": "string"
+        },
+        "mode": {
+          "const": "secret_ref",
+          "default": "secret_ref",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "credential_ref"
+      ],
+      "title": "SecretRefValue",
+      "type": "object"
+    },
+    "TableAssertionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_empty": {
+          "default": false,
+          "title": "Allow Empty",
+          "type": "boolean"
+        },
+        "assertion_type": {
+          "const": "clipboard.table",
+          "default": "clipboard.table",
+          "title": "Assertion Type",
+          "type": "string"
+        },
+        "max_rows": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Rows"
+        },
+        "min_rows": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Rows"
+        },
+        "required_headers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Headers",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "required_tokens": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Tokens",
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "title": "TableAssertionSpec",
+      "type": "object"
+    },
+    "TargetAppSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "app_id": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "App Id",
+          "type": "string"
+        },
+        "process_executable": {
+          "minLength": 1,
+          "title": "Process Executable",
+          "type": "string"
+        },
+        "window_class": {
+          "minLength": 1,
+          "title": "Window Class",
+          "type": "string"
+        },
+        "window_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window Title"
+        }
+      },
+      "required": [
+        "app_id",
+        "process_executable",
+        "window_class"
+      ],
+      "title": "TargetAppSpec",
+      "type": "object"
+    },
+    "TargetSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_id": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Adapter Id",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "required": [
+        "adapter_id",
+        "payload"
+      ],
+      "title": "TargetSpec",
+      "type": "object"
+    },
+    "VariableDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "source": {
+          "discriminator": {
+            "mapping": {
+              "credential_ref": "#/$defs/CredentialSource",
+              "csv_column": "#/$defs/DataColumnSource",
+              "date_rule": "#/$defs/DateRuleSource",
+              "fixed_default": "#/$defs/FixedDefaultSource",
+              "inline_options": "#/$defs/InlineChoiceSource",
+              "run_input": "#/$defs/RunInputSource",
+              "xlsx_column": "#/$defs/DataColumnSource"
+            },
+            "propertyName": "source_type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RunInputSource"
+            },
+            {
+              "$ref": "#/$defs/FixedDefaultSource"
+            },
+            {
+              "$ref": "#/$defs/InlineChoiceSource"
+            },
+            {
+              "$ref": "#/$defs/DataColumnSource"
+            },
+            {
+              "$ref": "#/$defs/DateRuleSource"
+            },
+            {
+              "$ref": "#/$defs/CredentialSource"
+            }
+          ],
+          "title": "Source"
+        },
+        "value_type": {
+          "enum": [
+            "text",
+            "date",
+            "integer",
+            "decimal",
+            "path",
+            "choice",
+            "secret"
+          ],
+          "title": "Value Type",
+          "type": "string"
+        },
+        "variable_id": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Variable Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variable_id",
+        "label",
+        "value_type",
+        "source"
+      ],
+      "title": "VariableDefinition",
+      "type": "object"
+    },
+    "VariableValue": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "variable",
+          "default": "variable",
+          "title": "Mode",
+          "type": "string"
+        },
+        "variable_id": {
+          "title": "Variable Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variable_id"
+      ],
+      "title": "VariableValue",
+      "type": "object"
+    },
+    "WaitSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/ConditionSpec"
+        },
+        "poll_interval_ms": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Poll Interval Ms",
+          "type": "integer"
+        },
+        "timeout_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 86400000,
+          "title": "Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "condition",
+        "timeout_ms"
+      ],
+      "title": "WaitSpec",
+      "type": "object"
+    },
+    "XlsxDataSource": {
+      "additionalProperties": false,
+      "properties": {
+        "data_source_id": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Data Source Id",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/ProjectRelativePath"
+        },
+        "sheet_name": {
+          "minLength": 1,
+          "title": "Sheet Name",
+          "type": "string"
+        },
+        "source_type": {
+          "const": "xlsx",
+          "default": "xlsx",
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_source_id",
+        "label",
+        "path",
+        "sheet_name"
+      ],
+      "title": "XlsxDataSource",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "data_sources": {
+      "default": [],
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "csv": "#/$defs/CsvDataSource",
+            "inline": "#/$defs/InlineDataSource",
+            "xlsx": "#/$defs/XlsxDataSource"
+          },
+          "propertyName": "source_type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/InlineDataSource"
+          },
+          {
+            "$ref": "#/$defs/CsvDataSource"
+          },
+          {
+            "$ref": "#/$defs/XlsxDataSource"
+          }
+        ]
+      },
+      "title": "Data Sources",
+      "type": "array"
+    },
+    "environment_policy": {
+      "$ref": "#/$defs/EnvironmentPolicy",
+      "default": {
+        "coordinate_client_size_tolerance_percent": 2,
+        "require_foreground_before_input": true,
+        "require_interactive_desktop": true
+      }
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "output_policy": {
+      "$ref": "#/$defs/OutputPolicy",
+      "default": {
+        "artifact_retention_days": 30,
+        "failure_screenshots": true
+      }
+    },
+    "revision": {
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "run_policy": {
+      "$ref": "#/$defs/RunPolicy",
+      "default": {
+        "max_iterations": 1000,
+        "max_runtime_seconds": 7200
+      }
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "action": "#/$defs/ActionStep",
+            "if_present": "#/$defs/IfPresentStep",
+            "loop": "#/$defs/LoopStep"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ActionStep"
+          },
+          {
+            "$ref": "#/$defs/LoopStep"
+          },
+          {
+            "$ref": "#/$defs/IfPresentStep"
+          }
+        ]
+      },
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    },
+    "target_apps": {
+      "items": {
+        "$ref": "#/$defs/TargetAppSpec"
+      },
+      "minItems": 1,
+      "title": "Target Apps",
+      "type": "array"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "variables": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/VariableDefinition"
+      },
+      "title": "Variables",
+      "type": "array"
+    },
+    "workflow_id": {
+      "format": "uuid",
+      "title": "Workflow Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workflow_id",
+    "name",
+    "revision",
+    "target_apps",
+    "steps",
+    "created_at",
+    "updated_at"
+  ],
+  "title": "Workflow",
+  "type": "object"
+}

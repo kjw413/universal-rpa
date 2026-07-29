@@ -1,0 +1,14 @@
+.venv/
+build/
+dist/
+*.spec~
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+projects/
+recordings/
+artifacts/
+*.egg-info/
+*.credential
