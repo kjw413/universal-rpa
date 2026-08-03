@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from universal_rpa.application.projects import ProjectSession
 from universal_rpa.bootstrap import AppServices
 from universal_rpa.domain.errors import ValidationReport
+from universal_rpa.ui.editor_page import WorkflowEditor
 from universal_rpa.ui.project_home import ProjectHome
 from universal_rpa.ui.recorder_page import RecorderPage
 
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
             services.normalization_service,
             services.recording_store,
         )
-        self.editor_page = _placeholder("업무 편집", "기록을 가져오거나 단계를 직접 추가하세요.")
+        self.editor_page = WorkflowEditor(services.editing_service)
         self.runner_page = _placeholder("실행", "실행 기능은 M4에서 활성화됩니다.")
         self.report_page = _placeholder("보고서", "실행 보고서는 M5에서 활성화됩니다.")
 
@@ -102,6 +103,8 @@ class MainWindow(QMainWindow):
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.project_page.session_opened.connect(self.open_session)
         self.project_page.failed.connect(self._show_safe_error)
+        self.recorder_page.candidates_reviewed.connect(self.editor_page.apply_command)
+        self.editor_page.edit_requested.connect(self._editor_changed)
         self.navigation.setCurrentRow(0)
 
         if services.startup_warnings:
@@ -148,14 +151,23 @@ class MainWindow(QMainWindow):
                     return False
         self.session = session
         self.project_page.show_session(session)
+        self.editor_page.set_session(session)
         self.statusBar().showMessage(f"프로젝트 열림: {session.workflow.name}")
         return True
 
     def show_validation(self, report: ValidationReport) -> None:
+        self.editor_page.show_validation(report)
         if report.is_valid:
             self.statusBar().showMessage("사전 검증을 통과했습니다.")
             return
         self.statusBar().showMessage(f"수정이 필요한 항목이 {len(report.errors)}개 있습니다.")
+
+    @Slot(object)
+    def _editor_changed(self, command: object) -> None:
+        del command
+        if self.editor_page.session is not None:
+            self.session = self.editor_page.session
+            self.statusBar().showMessage("프로젝트에 저장되지 않은 변경이 있습니다.")
 
     @Slot(str)
     def _show_safe_error(self, message: str) -> None:
