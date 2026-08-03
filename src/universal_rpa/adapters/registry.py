@@ -172,6 +172,12 @@ class AdapterRegistry:
             registered.append(adapter.adapter_id)
         return tuple(registered)
 
+    def adapter_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._descriptors))
+
+    def descriptors(self) -> tuple[AdapterDescriptor, ...]:
+        return tuple(self._descriptors[adapter_id] for adapter_id in sorted(self._descriptors))
+
     def descriptor_fingerprint(self) -> str:
         return _fingerprint(list(self._descriptors.values()))
 

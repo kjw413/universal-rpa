@@ -11,7 +11,7 @@ class SecretValue:
     __slots__ = ("__value",)
 
     def __init__(self, value: str) -> None:
-        self.__value = value
+        self.__value = bytearray(value.encode("utf-8"))
 
     @classmethod
     def from_text(cls, value: str) -> SecretValue:
@@ -21,7 +21,12 @@ class SecretValue:
 
     @contextmanager
     def reveal(self) -> Iterator[str]:
-        yield self.__value
+        temporary = bytearray(self.__value)
+        try:
+            yield temporary.decode("utf-8")
+        finally:
+            for index in range(len(temporary)):
+                temporary[index] = 0
 
     def __repr__(self) -> str:
         return "SecretValue(<redacted>)"

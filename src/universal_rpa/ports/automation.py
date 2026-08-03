@@ -16,7 +16,7 @@ from universal_rpa.domain.conditions import (
     TableAssertionSpec,
 )
 from universal_rpa.domain.errors import ErrorCode, RpaError, ValidationIssue
-from universal_rpa.domain.results import OutputCommit, TableData
+from universal_rpa.domain.results import LoopCursor, OutputCommit, TableData
 from universal_rpa.domain.targets import DateContext, RuntimeEnvironment, TargetSpec
 from universal_rpa.domain.types import (
     DataCell,
@@ -141,9 +141,11 @@ class ExecutionContext:
     output_root: Path
     row_stack: tuple[FrozenMapping[str, DataCell], ...]
     action_outputs: FrozenMapping[UUID, FrozenJsonValue | TableData]
+    iteration_cursor: tuple[LoopCursor, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "iteration_path", tuple(self.iteration_path))
+        object.__setattr__(self, "iteration_cursor", tuple(self.iteration_cursor))
         object.__setattr__(self, "variables", _freeze_prepared_mapping(self.variables))
         object.__setattr__(self, "credential_refs", _freeze_string_mapping(self.credential_refs))
         object.__setattr__(self, "row_stack", tuple(_freeze_row(row) for row in self.row_stack))
@@ -336,6 +338,7 @@ class AdapterActionResult:
     error_code: ErrorCode | None = None
     safe_message: str = ""
     output_commit: OutputCommit | None = None
+    runtime: RuntimeEnvironment | None = None
 
     def __post_init__(self) -> None:
         if self.output is not None and not isinstance(self.output, TableData):

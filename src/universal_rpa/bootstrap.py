@@ -10,18 +10,32 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
+from universal_rpa.adapters.clipboard import ClipboardAutomationAdapter
 from universal_rpa.adapters.registry import AdapterRegistry
-from universal_rpa.adapters.tabular import TabularDataSourceProvider
+from universal_rpa.adapters.tabular import TabularAutomationAdapter, TabularDataSourceProvider
+from universal_rpa.adapters.windows.adapter import WindowsAutomationAdapter
 from universal_rpa.adapters.windows.capture import PynputInputCapture
 from universal_rpa.adapters.windows.context import UiaFocusCache, WindowsWindowContext
+from universal_rpa.adapters.windows.credentials import WindowsCredentialStore
+from universal_rpa.adapters.windows.environment import WindowsEnvironmentProbe
+from universal_rpa.adapters.windows.foreground import ForegroundGuard
+from universal_rpa.adapters.windows.input_driver import WindowsInputDriver
+from universal_rpa.adapters.windows.target_resolver import WindowsTargetResolver
 from universal_rpa.adapters.windows.window_catalog import PyWin32WindowFacade, Win32WindowCatalog
 from universal_rpa.application.editing import WorkflowEditingService
+from universal_rpa.application.execution import ExecutionService
+from universal_rpa.application.loops import LoopPlanner
 from universal_rpa.application.normalization import NormalizationService
+from universal_rpa.application.preflight import PreflightService
 from universal_rpa.application.projects import ProjectService
 from universal_rpa.application.recording import RecordingService
 from universal_rpa.application.recording_privacy import RecordingPrivacyService
 from universal_rpa.application.validation import ValidationService
+from universal_rpa.application.value_resolution import ValueResolver
+from universal_rpa.application.variable_preparation import VariablePreparationService
 from universal_rpa.domain.recording import EventFocusSnapshot
+from universal_rpa.infrastructure.checkpoint_store import JsonCheckpointStore
+from universal_rpa.infrastructure.execution_journal import JsonExecutionJournalStore
 from universal_rpa.infrastructure.recording_store import JsonlRecordingStore, RetentionSummary
 from universal_rpa.infrastructure.target_preview_store import TargetPreviewStore
 from universal_rpa.ports.capture import ControlSink, InputCapturePort, InputEventSink
@@ -130,6 +144,7 @@ class AppServices:
     preview_store: TargetPreviewStore = field(default_factory=TargetPreviewStore)
     recording_privacy: RecordingPrivacyService | None = None
     data_sources: DataSourcePort | None = None
+    execution_service: ExecutionService | None = None
     startup_warnings: tuple[str, ...] = ()
 
 
@@ -198,6 +213,40 @@ def build_services(
 
     registry = adapter_registry or AdapterRegistry()
     data_sources = TabularDataSourceProvider()
+    secret_store = WindowsCredentialStore()
+    execution_service: ExecutionService | None = None
+    if adapter_registry is None:
+        probe = WindowsEnvironmentProbe()
+        guard = ForegroundGuard(probe)
+        resolver = WindowsTargetResolver(probe, guard)
+        windows_adapter = WindowsAutomationAdapter(
+            resolver,
+            WindowsInputDriver(guard),
+            probe,
+            target_capture=window_context if hasattr(window_context, "capture_target") else None,
+        )
+        registry.register(windows_adapter)
+        registry.register(ClipboardAutomationAdapter())
+        registry.register(TabularAutomationAdapter())
+        app_data_root = (
+            Path(local_app_data) if local_app_data is not None else Path(os.environ["LOCALAPPDATA"])
+        )
+        run_root = app_data_root / "UniversalRPAStudio" / "runs"
+        execution_service = ExecutionService(
+            preflight=PreflightService(
+                ValidationService(
+                    registry=registry, data_sources=data_sources, secret_store=secret_store
+                ),
+                lambda _: probe.snapshot(probe.foreground_hwnd()),
+            ),
+            registry=registry,
+            loop_planner=LoopPlanner(data_sources),
+            variable_preparation=VariablePreparationService(),
+            value_resolver=ValueResolver(secret_store),
+            secret_store=secret_store,
+            checkpoints=JsonCheckpointStore(run_root / "checkpoints"),
+            journals=JsonExecutionJournalStore(run_root / "journals"),
+        )
     preview_store = TargetPreviewStore()
     privacy = RecordingPrivacyService(store)
     recording_service = RecordingService(
@@ -217,6 +266,7 @@ def build_services(
         preview_store=preview_store,
         recording_privacy=privacy,
         data_sources=data_sources,
+        execution_service=execution_service,
         startup_warnings=tuple(warnings),
     )
 
