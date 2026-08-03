@@ -34,6 +34,13 @@ class RecordingStateError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class RecordingTransition:
+    previous: RecordingState
+    current: RecordingState
+    reason: Literal["started", "paused", "resumed", "stop_requested", "stopped"]
+
+
+@dataclass(frozen=True, slots=True)
 class _QueuedEvent:
     event: NativeInputEvent
     capture_state: Literal["recording", "paused"]
@@ -74,6 +81,7 @@ class RecordingService:
         self._worker_stop = threading.Event()
         self._stopped = threading.Event()
         self._event_queue: queue.Queue[_QueuedEvent] = queue.Queue(maxsize=queue_size)
+        self._transition_queue: queue.SimpleQueue[RecordingTransition] = queue.SimpleQueue()
         self._event_capture_state: Literal["recording", "paused"] = "recording"
         self._session: RecordingSession | None = None
         self._target: RecordingTarget | None = None
@@ -93,10 +101,19 @@ class RecordingService:
     def stop_requested(self) -> bool:
         return self._stop_requested.is_set()
 
+    def drain_transitions(self) -> tuple[RecordingTransition, ...]:
+        transitions: list[RecordingTransition] = []
+        while True:
+            try:
+                transitions.append(self._transition_queue.get_nowait())
+            except queue.Empty:
+                return tuple(transitions)
+
     def start(self, target: RecordingTarget) -> RecordingSession:
         with self._state_lock:
             if self._state not in {RecordingState.IDLE, RecordingState.STOPPED}:
                 raise RecordingStateError("recording is already active")
+            previous_state = self._state
             session = RecordingSession(
                 session_id=self._session_id_factory(),
                 target=target,
@@ -104,6 +121,7 @@ class RecordingService:
             )
             self._reset_session_state(session, target)
             self._state = RecordingState.RECORDING
+        self._record_transition(previous_state, RecordingState.RECORDING, "started")
 
         try:
             self._store.create_session(session)
@@ -123,6 +141,7 @@ class RecordingService:
                 raise RecordingStateError("only an active recording can be paused")
             self._state = RecordingState.PAUSED
             self._event_capture_state = "paused"
+        self._record_transition(RecordingState.RECORDING, RecordingState.PAUSED, "paused")
 
     def resume(self) -> None:
         with self._state_lock:
@@ -130,6 +149,7 @@ class RecordingService:
                 raise RecordingStateError("only a paused recording can be resumed")
             self._state = RecordingState.RECORDING
             self._event_capture_state = "recording"
+        self._record_transition(RecordingState.PAUSED, RecordingState.RECORDING, "resumed")
 
     def stop(
         self,
@@ -178,13 +198,22 @@ class RecordingService:
         if command is ControlCommand.STOP:
             self._request_stop()
             return
+        transition: RecordingTransition | None = None
         with self._state_lock:
             if self._state == RecordingState.RECORDING:
                 self._state = RecordingState.PAUSED
                 self._event_capture_state = "paused"
+                transition = RecordingTransition(
+                    RecordingState.RECORDING, RecordingState.PAUSED, "paused"
+                )
             elif self._state == RecordingState.PAUSED:
                 self._state = RecordingState.RECORDING
                 self._event_capture_state = "recording"
+                transition = RecordingTransition(
+                    RecordingState.PAUSED, RecordingState.RECORDING, "resumed"
+                )
+        if transition is not None:
+            self._transition_queue.put_nowait(transition)
 
     def _reset_session_state(
         self,
@@ -195,6 +224,7 @@ class RecordingService:
         self._worker_stop.clear()
         self._stopped.clear()
         self._event_queue = queue.Queue(maxsize=self._queue_size)
+        self._transition_queue = queue.SimpleQueue()
         self._event_capture_state = "recording"
         self._session = session
         self._target = target
@@ -268,9 +298,13 @@ class RecordingService:
         self._finalize_once()
 
     def _request_stop(self) -> None:
+        previous: RecordingState | None = None
         with self._state_lock:
             if self._state in {RecordingState.RECORDING, RecordingState.PAUSED}:
+                previous = self._state
                 self._state = RecordingState.STOPPING
+        if previous is not None:
+            self._record_transition(previous, RecordingState.STOPPING, "stop_requested")
         self._stop_requested.set()
 
     def _finalize_once(self) -> RecordingSessionSummary:
@@ -288,7 +322,9 @@ class RecordingService:
             )
             self._summary = summary
             with self._state_lock:
+                previous_state = self._state
                 self._state = RecordingState.STOPPED
+            self._record_transition(previous_state, RecordingState.STOPPED, "stopped")
             self._stopped.set()
             return summary
 
@@ -297,6 +333,14 @@ class RecordingService:
         if summary is None:
             raise RecordingStateError("recording has no final summary")
         return summary
+
+    def _record_transition(
+        self,
+        previous: RecordingState,
+        current: RecordingState,
+        reason: Literal["started", "paused", "resumed", "stop_requested", "stopped"],
+    ) -> None:
+        self._transition_queue.put_nowait(RecordingTransition(previous, current, reason))
 
     def _mark_incomplete(self) -> None:
         self._incomplete = True
@@ -321,4 +365,9 @@ class RecordingService:
             event.key_token.discard()
 
 
-__all__ = ["RecordingService", "RecordingState", "RecordingStateError"]
+__all__ = [
+    "RecordingService",
+    "RecordingState",
+    "RecordingStateError",
+    "RecordingTransition",
+]

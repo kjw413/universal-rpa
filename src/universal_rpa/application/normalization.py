@@ -486,6 +486,10 @@ from universal_rpa.application.keyboard_normalization import (  # noqa: E402, I0
     normalize_keyboard_events,
     suggest_variable_types,
 )
+from universal_rpa.application.normalization_service import (  # noqa: E402
+    NormalizationService,
+    RecordingNotNormalizable,
+)
 
 
 __all__ = [
@@ -498,7 +502,9 @@ __all__ = [
     "MaterializedWindowsTarget",
     "MouseThresholds",
     "NormalizationResult",
+    "NormalizationService",
     "NormalizationWarning",
+    "RecordingNotNormalizable",
     "StepCandidate",
     "materialize_windows_target",
     "normalize_keyboard_events",

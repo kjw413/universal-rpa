@@ -9,6 +9,8 @@ __pycache__/
 *.py[cod]
 projects/
 recordings/
+!tests/fixtures/recordings/
+!tests/fixtures/recordings/**
 artifacts/
 *.egg-info/
 *.credential
