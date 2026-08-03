@@ -20,6 +20,7 @@ from universal_rpa.application.projects import ProjectSession
 from universal_rpa.bootstrap import AppServices
 from universal_rpa.domain.errors import ValidationReport
 from universal_rpa.ui.project_home import ProjectHome
+from universal_rpa.ui.recorder_page import RecorderPage
 
 
 def _placeholder(title: str, message: str) -> QWidget:
@@ -59,7 +60,12 @@ class MainWindow(QMainWindow):
         self.pages.setObjectName("pages")
 
         self.project_page = ProjectHome(services.project_service)
-        self.recorder_page = _placeholder("업무 기록", "프로젝트를 연 뒤 대상 창을 선택하세요.")
+        self.recorder_page = RecorderPage(
+            services.window_context,
+            services.recording_service,
+            services.normalization_service,
+            services.recording_store,
+        )
         self.editor_page = _placeholder("업무 편집", "기록을 가져오거나 단계를 직접 추가하세요.")
         self.runner_page = _placeholder("실행", "실행 기능은 M4에서 활성화됩니다.")
         self.report_page = _placeholder("보고서", "실행 보고서는 M5에서 활성화됩니다.")
