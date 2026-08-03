@@ -13,9 +13,11 @@ from universal_rpa.ports.automation import (
     TargetCaptureRequest,
     TargetCaptureResult,
 )
+from universal_rpa.ports.capture import ControlCommand, ControlHotkeys, InputCapturePort
+from universal_rpa.ports.context import CapturedEventContext, WindowContextPort
 from universal_rpa.ports.credentials import SecretStorePort, SecretValue
 from universal_rpa.ports.data_sources import DataPreview, DataSourcePort
-from universal_rpa.ports.repositories import WorkflowRepositoryPort
+from universal_rpa.ports.repositories import RecordingStorePort, WorkflowRepositoryPort
 
 __all__ = [
     "ActionRequest",
@@ -24,14 +26,20 @@ __all__ = [
     "AssertionObservation",
     "AutomationAdapter",
     "CancellationToken",
+    "CapturedEventContext",
     "ConditionObservation",
+    "ControlCommand",
+    "ControlHotkeys",
     "DataPreview",
     "DataSourcePort",
     "ExecutionContext",
+    "InputCapturePort",
+    "RecordingStorePort",
     "SecretStorePort",
     "SecretValue",
     "TargetCapturePort",
     "TargetCaptureRequest",
     "TargetCaptureResult",
+    "WindowContextPort",
     "WorkflowRepositoryPort",
 ]
