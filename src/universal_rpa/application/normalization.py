@@ -184,7 +184,10 @@ def _relative_point(
         )
     bounds = event.target_snapshot.bounds if event.target_snapshot is not None else None
     if bounds is not None:
-        return RelativePoint(x=bounds.x + bounds.width / 2, y=bounds.y + bounds.height / 2)
+        return RelativePoint(
+            x=round(bounds.x + bounds.width / 2, 12),
+            y=round(bounds.y + bounds.height / 2, 12),
+        )
     return None
 
 
@@ -477,16 +480,28 @@ def normalize_mouse_events(
     )
 
 
+from universal_rpa.application.keyboard_normalization import (  # noqa: E402, I001
+    COMMAND_KEYS,
+    KeyboardNormalizationConfig,
+    normalize_keyboard_events,
+    suggest_variable_types,
+)
+
+
 __all__ = [
+    "COMMAND_KEYS",
     "CandidateLiteralValue",
     "CandidateSecretValue",
     "CandidateSuggestion",
     "CandidateValue",
+    "KeyboardNormalizationConfig",
     "MaterializedWindowsTarget",
     "MouseThresholds",
     "NormalizationResult",
     "NormalizationWarning",
     "StepCandidate",
     "materialize_windows_target",
+    "normalize_keyboard_events",
     "normalize_mouse_events",
+    "suggest_variable_types",
 ]
