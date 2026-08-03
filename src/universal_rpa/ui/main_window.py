@@ -67,7 +67,13 @@ class MainWindow(QMainWindow):
             services.normalization_service,
             services.recording_store,
         )
-        self.editor_page = WorkflowEditor(services.editing_service)
+        self.editor_page = WorkflowEditor(
+            services.editing_service,
+            validation_service=services.validation_service,
+            project_service=services.project_service,
+            preview_store=services.preview_store,
+            privacy_service=services.recording_privacy,
+        )
         self.runner_page = _placeholder("실행", "실행 기능은 M4에서 활성화됩니다.")
         self.report_page = _placeholder("보고서", "실행 보고서는 M5에서 활성화됩니다.")
 
@@ -103,6 +109,7 @@ class MainWindow(QMainWindow):
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.project_page.session_opened.connect(self.open_session)
         self.project_page.failed.connect(self._show_safe_error)
+        self.recorder_page.recording_completed.connect(self.editor_page.remember_recording_result)
         self.recorder_page.candidates_reviewed.connect(self.editor_page.apply_command)
         self.editor_page.edit_requested.connect(self._editor_changed)
         self.navigation.setCurrentRow(0)

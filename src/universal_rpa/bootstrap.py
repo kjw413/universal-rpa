@@ -5,12 +5,13 @@ import os
 import threading
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
 from universal_rpa.adapters.registry import AdapterRegistry
+from universal_rpa.adapters.tabular import TabularDataSourceProvider
 from universal_rpa.adapters.windows.capture import PynputInputCapture
 from universal_rpa.adapters.windows.context import UiaFocusCache, WindowsWindowContext
 from universal_rpa.adapters.windows.window_catalog import PyWin32WindowFacade, Win32WindowCatalog
@@ -18,11 +19,14 @@ from universal_rpa.application.editing import WorkflowEditingService
 from universal_rpa.application.normalization import NormalizationService
 from universal_rpa.application.projects import ProjectService
 from universal_rpa.application.recording import RecordingService
+from universal_rpa.application.recording_privacy import RecordingPrivacyService
 from universal_rpa.application.validation import ValidationService
 from universal_rpa.domain.recording import EventFocusSnapshot
 from universal_rpa.infrastructure.recording_store import JsonlRecordingStore, RetentionSummary
+from universal_rpa.infrastructure.target_preview_store import TargetPreviewStore
 from universal_rpa.ports.capture import ControlSink, InputCapturePort, InputEventSink
 from universal_rpa.ports.context import WindowContextPort
+from universal_rpa.ports.data_sources import DataSourcePort
 from universal_rpa.ports.repositories import RecordingStorePort
 
 
@@ -123,6 +127,9 @@ class AppServices:
     adapter_registry: AdapterRegistry
     recording_store: RecordingStorePort
     window_context: WindowContextPort
+    preview_store: TargetPreviewStore = field(default_factory=TargetPreviewStore)
+    recording_privacy: RecordingPrivacyService | None = None
+    data_sources: DataSourcePort | None = None
     startup_warnings: tuple[str, ...] = ()
 
 
@@ -190,6 +197,9 @@ def build_services(
         capture, window_context = _production_recording_boundaries()
 
     registry = adapter_registry or AdapterRegistry()
+    data_sources = TabularDataSourceProvider()
+    preview_store = TargetPreviewStore()
+    privacy = RecordingPrivacyService(store)
     recording_service = RecordingService(
         capture=capture,
         context=window_context,
@@ -200,10 +210,13 @@ def build_services(
         recording_service=recording_service,
         normalization_service=NormalizationService(),
         editing_service=WorkflowEditingService(),
-        validation_service=ValidationService(registry=registry),
+        validation_service=ValidationService(registry=registry, data_sources=data_sources),
         adapter_registry=registry,
         recording_store=store,
         window_context=window_context,
+        preview_store=preview_store,
+        recording_privacy=privacy,
+        data_sources=data_sources,
         startup_warnings=tuple(warnings),
     )
 

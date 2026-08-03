@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from uuid import UUID
 
 from PySide6.QtCore import QModelIndex, Signal, Slot
 from PySide6.QtWidgets import (
-    QFormLayout,
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QSplitter,
     QTreeView,
@@ -14,12 +13,28 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from universal_rpa.application.editing import EditRejected, WorkflowEditingService
-from universal_rpa.application.projects import ProjectSession
+from universal_rpa.application.editing import (
+    EditRejected,
+    ReplaceTarget,
+    SetStepValue,
+    WorkflowEditingService,
+)
+from universal_rpa.application.normalization import NormalizationResult
+from universal_rpa.application.projects import ProjectService, ProjectSession
+from universal_rpa.application.recording_privacy import RecordingPrivacyService
+from universal_rpa.application.validation import ValidationService
 from universal_rpa.domain.errors import ValidationReport
+from universal_rpa.domain.values import SecretRefValue
 from universal_rpa.domain.workflow import ActionStep, Step
+from universal_rpa.infrastructure.target_preview_store import (
+    MaskedPreviewVariant,
+    TargetPreviewStore,
+)
+from universal_rpa.ports.automation import TargetCaptureResult
 from universal_rpa.ui.json_inspector import JsonInspector
+from universal_rpa.ui.property_panel import PropertyPanel
 from universal_rpa.ui.step_tree_model import WorkflowTreeModel
+from universal_rpa.ui.target_picker import TargetPicker
 from universal_rpa.ui.target_preview import (
     MissingTargetPreviewResolver,
     TargetPreview,
@@ -27,23 +42,8 @@ from universal_rpa.ui.target_preview import (
 )
 
 
-class StepPropertySummary(QWidget):
-    def __init__(self) -> None:
-        super().__init__()
-        self.step_id: UUID | None = None
-        self.label_value = QLabel("단계를 선택하세요")
-        self.kind_value = QLabel("-")
-        self.action_value = QLabel("-")
-        form = QFormLayout(self)
-        form.addRow("단계 이름", self.label_value)
-        form.addRow("종류", self.kind_value)
-        form.addRow("작업", self.action_value)
-
-    def set_step(self, step: Step | None) -> None:
-        self.step_id = step.step_id if step is not None else None
-        self.label_value.setText(step.label if step is not None else "단계를 선택하세요")
-        self.kind_value.setText(step.kind if step is not None else "-")
-        self.action_value.setText(step.action_type if isinstance(step, ActionStep) else "-")
+class ProjectSaveFailed(RuntimeError):
+    pass
 
 
 class WorkflowEditor(QWidget):
@@ -56,17 +56,29 @@ class WorkflowEditor(QWidget):
         self,
         editing_service: WorkflowEditingService,
         preview_resolver: TargetPreviewResolver | None = None,
+        *,
+        validation_service: ValidationService | None = None,
+        project_service: ProjectService | None = None,
+        preview_store: TargetPreviewStore | None = None,
+        privacy_service: RecordingPrivacyService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._editing_service = editing_service
+        self._validation_service = validation_service
+        self._project_service = project_service
+        self.preview_store = preview_store
+        self._privacy_service = privacy_service
+        self._source_session_ids: tuple[UUID, ...] = ()
         self.session: ProjectSession | None = None
+        self.target_picker_factory: Callable[[], TargetPicker] | None = None
         self.tree_model = WorkflowTreeModel()
         self.tree_view = QTreeView()
         self.tree_view.setModel(self.tree_model)
         self.tree_view.setHeaderHidden(True)
-        self.target_preview = TargetPreview(preview_resolver or MissingTargetPreviewResolver())
-        self.property_panel = StepPropertySummary()
+        resolver = preview_store or preview_resolver or MissingTargetPreviewResolver()
+        self.target_preview = TargetPreview(resolver)
+        self.property_panel = PropertyPanel()
         self.json_inspector = JsonInspector(self)
 
         self.json_button = QPushButton("JSON 보기")
@@ -95,6 +107,7 @@ class WorkflowEditor(QWidget):
         layout.addWidget(splitter, 1)
 
         self.tree_view.selectionModel().currentChanged.connect(self._selection_changed)
+        self.property_panel.command_ready.connect(self.apply_command)
         self.json_button.clicked.connect(self.show_json_inspector)
         self.retarget_button.clicked.connect(self.retarget_selected_step)
         self.test_button.clicked.connect(self._request_step_test)
@@ -102,31 +115,117 @@ class WorkflowEditor(QWidget):
 
     def set_session(self, session: ProjectSession) -> None:
         self.session = session
-        self.tree_model.set_workflow(session.workflow)
-        self.tree_view.expandAll()
-        if self.tree_model.rowCount() > 0:
-            self.tree_view.setCurrentIndex(self.tree_model.index(0, 0))
-        self.json_inspector.set_workflow(session.workflow)
+        self._refresh_workflow(selected_step_id=None)
 
     @Slot(object)
     def apply_command(self, command: object) -> bool:
         session = self.session
         if session is None:
             return False
+        if isinstance(command, SetStepValue) and isinstance(command.value, SecretRefValue):
+            return self._apply_secret_command(command)
         try:
             updated = self._editing_service.apply(session.workflow, command)  # type: ignore[arg-type]
         except (EditRejected, TypeError):
             return False
+        selected = getattr(command, "step_id", None)
         self.session = ProjectSession(
             project_dir=session.project_dir,
             workflow=updated,
             loaded_revision=session.loaded_revision,
             dirty=True,
         )
-        self.tree_model.set_workflow(updated)
-        self.json_inspector.set_workflow(updated)
+        self._refresh_workflow(selected_step_id=selected if isinstance(selected, UUID) else None)
         self.edit_requested.emit(command)
         return True
+
+    def _apply_secret_command(self, command: SetStepValue) -> bool:
+        session = self.session
+        privacy = self._privacy_service
+        project_service = self._project_service
+        store = self.preview_store
+        step = self.tree_model.step(self.tree_model.index_for_step(command.step_id))
+        if (
+            session is None
+            or privacy is None
+            or project_service is None
+            or store is None
+            or not isinstance(step, ActionStep)
+        ):
+            return False
+        variant: MaskedPreviewVariant | None = None
+        try:
+            privacy.purge_before_secret_mode(
+                self._source_session_ids or None,
+                allow_retained=True,
+            )
+            secured_target = step.target
+            if secured_target is not None:
+                secured_target, variant = store.stage_secret_mask(
+                    session.project_dir,
+                    step.step_id,
+                    secured_target,
+                )
+            updated = session.workflow
+            if secured_target != step.target:
+                updated = self._editing_service.apply(
+                    updated,
+                    ReplaceTarget(step.step_id, secured_target),
+                )
+            updated = self._editing_service.apply(updated, command)
+            if variant is not None:
+                store.commit_variant(variant)
+            else:
+                store.delete_variants(session.project_dir, step.step_id)
+            saved = project_service.save(project_service.with_workflow(session, updated))
+        except Exception:
+            if variant is not None:
+                store.discard_variant(variant)
+            try:
+                store.delete_variants(session.project_dir, step.step_id)
+            except Exception:
+                pass
+            return False
+        self._source_session_ids = ()
+        self.session = saved
+        self._refresh_workflow(selected_step_id=step.step_id)
+        self.edit_requested.emit(command)
+        return True
+
+    def apply_capture(self, capture: TargetCaptureResult) -> None:
+        session = self.session
+        step = self.selected_step()
+        store = self.preview_store
+        project_service = self._project_service
+        if (
+            session is None
+            or not isinstance(step, ActionStep)
+            or capture.target is None
+            or store is None
+            or project_service is None
+        ):
+            raise ProjectSaveFailed("대상 변경을 저장할 준비가 되지 않았습니다.")
+        variant: MaskedPreviewVariant | None = None
+        try:
+            variant = store.stage_masked(session.project_dir, step.step_id, capture)
+            updated = self._editing_service.apply(
+                session.workflow,
+                ReplaceTarget(step.step_id, capture.target),
+            )
+            candidate = project_service.with_workflow(session, updated)
+            saved = project_service.save(candidate)
+            store.commit_variant(variant)
+        except Exception:
+            if variant is not None:
+                store.discard_variant(variant)
+            raise ProjectSaveFailed("새 대상과 미리보기를 저장하지 못했습니다.") from None
+        self.session = saved
+        self._refresh_workflow(selected_step_id=step.step_id)
+        self.edit_requested.emit(ReplaceTarget(step.step_id, capture.target))
+
+    def remember_recording_result(self, result: object) -> None:
+        if isinstance(result, NormalizationResult):
+            self._source_session_ids = (result.session_id,)
 
     def show_validation(self, report: ValidationReport) -> None:
         self.tree_model.set_validation(report)
@@ -140,11 +239,33 @@ class WorkflowEditor(QWidget):
     def selected_step(self) -> Step | None:
         return self.tree_model.step(self.tree_view.currentIndex())
 
+    def change_selected_value_mode(self, mode: str) -> None:
+        labels = {
+            "literal": "고정값",
+            "variable": "실행 변수",
+            "row_binding": "반복 열",
+            "secret_ref": "비밀값",
+            "none": "값 없음",
+        }
+        label = labels.get(mode)
+        if label is not None:
+            self.property_panel.mode_combo.setCurrentText(label)
+
     @Slot()
     def retarget_selected_step(self) -> None:
         step = self.selected_step()
-        if isinstance(step, ActionStep):
+        if not isinstance(step, ActionStep):
+            return
+        factory = self.target_picker_factory
+        if factory is None:
             self.retarget_requested.emit(step.step_id)
+            return
+        picker = factory()
+        if picker.exec() != TargetPicker.DialogCode.Accepted:
+            return
+        capture = picker.captured_result()
+        if capture is not None:
+            self.apply_capture(capture)
 
     @Slot(QModelIndex, QModelIndex)
     def _selection_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
@@ -163,5 +284,24 @@ class WorkflowEditor(QWidget):
         if step_id is not None:
             self.step_test_requested.emit(step_id)
 
+    def _refresh_workflow(self, selected_step_id: UUID | None) -> None:
+        session = self.session
+        if session is None:
+            return
+        self.tree_model.set_workflow(session.workflow)
+        self.tree_view.expandAll()
+        if self._validation_service is not None:
+            self.tree_model.set_validation(
+                self._validation_service.validate_static(session.workflow)
+            )
+        selected = (
+            self.tree_model.index_for_step(selected_step_id)
+            if selected_step_id is not None
+            else self.tree_model.index(0, 0)
+        )
+        if selected.isValid():
+            self.tree_view.setCurrentIndex(selected)
+        self.json_inspector.set_workflow(session.workflow)
 
-__all__ = ["StepPropertySummary", "WorkflowEditor"]
+
+__all__ = ["ProjectSaveFailed", "WorkflowEditor"]
