@@ -20,6 +20,10 @@ from universal_rpa.adapters.windows.credentials import WindowsCredentialStore
 from universal_rpa.adapters.windows.environment import WindowsEnvironmentProbe
 from universal_rpa.adapters.windows.foreground import ForegroundGuard
 from universal_rpa.adapters.windows.input_driver import WindowsInputDriver
+from universal_rpa.adapters.windows.screen_capture import (
+    UiaPasswordRegionProbe,
+    Win32ExactWindowCapture,
+)
 from universal_rpa.adapters.windows.target_resolver import WindowsTargetResolver
 from universal_rpa.adapters.windows.window_catalog import PyWin32WindowFacade, Win32WindowCatalog
 from universal_rpa.application.editing import WorkflowEditingService
@@ -30,13 +34,22 @@ from universal_rpa.application.preflight import PreflightService
 from universal_rpa.application.projects import ProjectService
 from universal_rpa.application.recording import RecordingService
 from universal_rpa.application.recording_privacy import RecordingPrivacyService
+from universal_rpa.application.reports import ReportProjector
 from universal_rpa.application.validation import ValidationService
 from universal_rpa.application.value_resolution import ValueResolver
 from universal_rpa.application.variable_preparation import VariablePreparationService
 from universal_rpa.domain.recording import EventFocusSnapshot
+from universal_rpa.infrastructure.artifact_store import (
+    DEFAULT_ARTIFACT_RETENTION,
+    ArtifactRetentionService,
+    ArtifactRetentionSummary,
+    RunArtifactStore,
+)
 from universal_rpa.infrastructure.checkpoint_store import JsonCheckpointStore
 from universal_rpa.infrastructure.execution_journal import JsonExecutionJournalStore
 from universal_rpa.infrastructure.recording_store import JsonlRecordingStore, RetentionSummary
+from universal_rpa.infrastructure.screenshots import FailureScreenshotService
+from universal_rpa.infrastructure.sensitive_regions import SensitiveRegionProvider
 from universal_rpa.infrastructure.target_preview_store import TargetPreviewStore
 from universal_rpa.ports.capture import ControlSink, InputCapturePort, InputEventSink
 from universal_rpa.ports.context import WindowContextPort
@@ -51,6 +64,14 @@ class RetentionRecordingStore(RecordingStorePort, Protocol):
         now: datetime,
         retention: timedelta = timedelta(days=7),
     ) -> RetentionSummary: ...
+
+
+class ArtifactRetentionPort(Protocol):
+    def prune(
+        self,
+        now: datetime,
+        retention: timedelta = DEFAULT_ARTIFACT_RETENTION,
+    ) -> ArtifactRetentionSummary: ...
 
 
 class _CoordinateOnlyUia:
@@ -145,6 +166,8 @@ class AppServices:
     recording_privacy: RecordingPrivacyService | None = None
     data_sources: DataSourcePort | None = None
     execution_service: ExecutionService | None = None
+    report_projector: ReportProjector = field(default_factory=ReportProjector)
+    artifact_store: RunArtifactStore | None = None
     startup_warnings: tuple[str, ...] = ()
 
 
@@ -184,6 +207,7 @@ def build_services(
     capture: InputCapturePort | None = None,
     window_context: WindowContextPort | None = None,
     adapter_registry: AdapterRegistry | None = None,
+    artifact_retention: ArtifactRetentionPort | None = None,
     now: datetime | None = None,
 ) -> AppServices:
     source_root = (
@@ -211,10 +235,34 @@ def build_services(
     if capture is None or window_context is None:
         capture, window_context = _production_recording_boundaries()
 
+    run_root = _run_artifact_root(local_app_data)
+    pruner = artifact_retention
+    if pruner is None and run_root is not None:
+        pruner = ArtifactRetentionService(run_root / "reports")
+    if pruner is not None:
+        try:
+            artifacts = pruner.prune(current, DEFAULT_ARTIFACT_RETENTION)
+        except Exception:
+            warnings.append("이전 실행 기록의 보존 기간 정리를 완료하지 못했습니다.")
+        else:
+            if artifacts.failures:
+                warnings.append("사용 중인 이전 실행 기록 일부는 정리하지 못했습니다.")
+
     registry = adapter_registry or AdapterRegistry()
     data_sources = TabularDataSourceProvider()
     secret_store = WindowsCredentialStore()
     execution_service: ExecutionService | None = None
+    projector = ReportProjector()
+    artifact_store: RunArtifactStore | None = None
+    if run_root is not None:
+        artifact_store = RunArtifactStore(
+            root=run_root / "reports",
+            projector=projector,
+            screenshots=FailureScreenshotService(
+                capture=Win32ExactWindowCapture(),
+                regions=SensitiveRegionProvider(password_probe=UiaPasswordRegionProbe()),
+            ),
+        )
     if adapter_registry is None:
         probe = WindowsEnvironmentProbe()
         guard = ForegroundGuard(probe)
@@ -228,10 +276,8 @@ def build_services(
         registry.register(windows_adapter)
         registry.register(ClipboardAutomationAdapter())
         registry.register(TabularAutomationAdapter())
-        app_data_root = (
-            Path(local_app_data) if local_app_data is not None else Path(os.environ["LOCALAPPDATA"])
-        )
-        run_root = app_data_root / "UniversalRPAStudio" / "runs"
+        if run_root is None:
+            raise RuntimeError("LOCALAPPDATA is required to run workflows")
         execution_service = ExecutionService(
             preflight=PreflightService(
                 ValidationService(
@@ -267,8 +313,24 @@ def build_services(
         recording_privacy=privacy,
         data_sources=data_sources,
         execution_service=execution_service,
+        report_projector=projector,
+        artifact_store=artifact_store,
         startup_warnings=tuple(warnings),
     )
 
 
-__all__ = ["AppServices", "RetentionRecordingStore", "build_services"]
+def _run_artifact_root(local_app_data: Path | None) -> Path | None:
+    if local_app_data is not None:
+        return Path(local_app_data) / "UniversalRPAStudio" / "runs"
+    configured = os.environ.get("LOCALAPPDATA")
+    if not configured:
+        return None
+    return Path(configured) / "UniversalRPAStudio" / "runs"
+
+
+__all__ = [
+    "AppServices",
+    "ArtifactRetentionPort",
+    "RetentionRecordingStore",
+    "build_services",
+]

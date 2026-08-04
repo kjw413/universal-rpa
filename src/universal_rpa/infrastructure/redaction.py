@@ -53,4 +53,39 @@ def sanitize_evidence(value: object) -> FrozenJsonObject:
     return frozen
 
 
-__all__ = ["sanitize_evidence"]
+def _strip_unsafe_json(value: object) -> JsonValue:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Mapping):
+        stripped: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("report keys must be strings")
+            if key.casefold() in _UNSAFE_EVIDENCE_KEYS:
+                continue
+            stripped[key] = _strip_unsafe_json(item)
+        return stripped
+    if isinstance(value, (list, tuple)):
+        return [_strip_unsafe_json(item) for item in value]
+    raise ValueError("report values must be JSON values")
+
+
+def redact_evidence(value: object) -> FrozenJsonObject:
+    """Drop unsafe field names and return a defensive, deeply immutable copy.
+
+    :func:`sanitize_evidence` stays fail-closed so an adapter that leaks a raw
+    field is caught at the boundary.  Report projection instead runs over data
+    that has already crossed that boundary and must always produce a document,
+    so unsafe names are removed rather than raised on.
+    """
+
+    stripped = _strip_unsafe_json(value)
+    if not isinstance(stripped, dict):
+        raise ValueError("report sections must be JSON objects")
+    frozen: FrozenJsonValue = deep_freeze_json(stripped)
+    if not isinstance(frozen, FrozenMapping):
+        raise ValueError("report sections must be JSON objects")
+    return frozen
+
+
+__all__ = ["redact_evidence", "sanitize_evidence"]
