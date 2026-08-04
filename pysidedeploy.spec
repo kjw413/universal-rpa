@@ -49,7 +49,12 @@ macos.permissions =
 # mode = onefile/standalone
 mode = standalone
 # (str) specify any extra nuitka arguments
-extra_args = --quiet --noinclude-qt-translations --windows-console-mode=disable --nofollow-import-to=tests --nofollow-import-to=samples --nofollow-import-to=scripts
+#
+# --assume-yes-for-downloads: a standalone Windows build needs Nuitka's
+# dependency walker and a C toolchain, which Nuitka fetches into its user cache.
+# Without this flag the build stops at an interactive prompt, so an unattended
+# build agent hangs or fails with no useful message.
+extra_args = --assume-yes-for-downloads --quiet --noinclude-qt-translations --windows-console-mode=disable --nofollow-import-to=tests --nofollow-import-to=samples --nofollow-import-to=scripts
 
 [buildozer]
 # build mode

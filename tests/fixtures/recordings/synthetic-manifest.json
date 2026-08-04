@@ -1,0 +1,10 @@
+{
+  "synthetic_only": true,
+  "description": "Synthetic recording fixtures. No customer input, window title, clipboard body, or credential appears in any listed file.",
+  "files": [
+    {
+      "path": "tests/fixtures/recordings/ctrl-a-date-enter/events.jsonl",
+      "sha256": "1e214482b354ec8f1b393025a8f1460f75f9e8d0951dc9b76c9c48ed881750a4"
+    }
+  ]
+}

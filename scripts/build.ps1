@@ -62,16 +62,27 @@ try {
     }
     Write-Output "using: $deploy"
 
-    Write-Output "== deploy dry run =="
-    & $deploy -c pysidedeploy.spec --dry-run --force
-    if ($LASTEXITCODE -ne 0) { throw "pyside6-deploy dry run failed" }
+    # pyside6-deploy rewrites the spec in place, baking in this machine's Python
+    # path and icon path. The committed spec must stay machine-independent, so
+    # snapshot it and restore it however the build ends.
+    $specPath = Join-Path $repositoryRoot "pysidedeploy.spec"
+    $specBackup = Get-Content -Raw -Path $specPath
+    try {
+        Write-Output "== deploy dry run =="
+        & $deploy -c pysidedeploy.spec --dry-run --force
+        if ($LASTEXITCODE -ne 0) { throw "pyside6-deploy dry run failed" }
 
-    Write-Output "== build =="
-    if (Test-Path (Join-Path $repositoryRoot "dist")) {
-        Remove-Item -Recurse -Force (Join-Path $repositoryRoot "dist")
+        Write-Output "== build =="
+        if (Test-Path (Join-Path $repositoryRoot "dist")) {
+            Remove-Item -Recurse -Force (Join-Path $repositoryRoot "dist")
+        }
+        & $deploy -c pysidedeploy.spec --force
+        if ($LASTEXITCODE -ne 0) { throw "pyside6-deploy build failed" }
     }
-    & $deploy -c pysidedeploy.spec --force
-    if ($LASTEXITCODE -ne 0) { throw "pyside6-deploy build failed" }
+    finally {
+        Set-Content -Path $specPath -Value $specBackup -NoNewline
+        Remove-Item -Recurse -Force (Join-Path $repositoryRoot "src\universal_rpa\deployment") -ErrorAction SilentlyContinue
+    }
 
     $executables = @(Get-ChildItem -Path (Join-Path $repositoryRoot "dist") -Recurse -Filter "*.exe")
     if ($executables.Count -ne 1) {
