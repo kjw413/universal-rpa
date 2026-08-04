@@ -36,6 +36,11 @@ function Resolve-FilterRepo {
     return $found
 }
 
+# Resolve the interpreter before changing directory: $Python may be relative to
+# the source checkout, and every later command runs inside the clone.
+$resolvedPython = $null
+if (Test-Path $Python) { $resolvedPython = (Resolve-Path $Python).Path }
+
 $sourceRepo = (git rev-parse --show-toplevel).Trim()
 if ([string]::IsNullOrWhiteSpace($sourceRepo)) {
     throw "not inside a git repository"
@@ -97,14 +102,26 @@ try {
     }
 
     $splitPython = Join-Path $splitRoot ".venv\Scripts\python.exe"
-    if (-not (Test-Path $splitPython)) { $splitPython = $Python }
-    if (Test-Path $splitPython) {
+    if (-not (Test-Path $splitPython)) { $splitPython = $resolvedPython }
+    if ($splitPython -and (Test-Path $splitPython)) {
         Write-Output "== schema and unit checks in the clone =="
-        & $splitPython scripts/export_schema.py --check
-        if ($LASTEXITCODE -ne 0) { throw "schema check failed in the split clone" }
+        # PYTHONPATH points at the CLONE's src so the checks exercise the extracted
+        # tree. Without it an editable install would silently test the source
+        # checkout instead, and the verification would prove nothing.
+        $previousPythonPath = $env:PYTHONPATH
+        $env:PYTHONPATH = (Join-Path $splitRoot "src")
         $env:QT_QPA_PLATFORM = "offscreen"
-        & $splitPython -m pytest tests/unit -q -m "not windows_e2e and not mis_pilot"
-        if ($LASTEXITCODE -ne 0) { throw "unit tests failed in the split clone" }
+        try {
+            & $splitPython scripts/export_schema.py --check
+            if ($LASTEXITCODE -ne 0) { throw "schema check failed in the split clone" }
+            & $splitPython -m pytest tests/unit -q -m "not windows_e2e and not mis_pilot"
+            if ($LASTEXITCODE -ne 0) { throw "unit tests failed in the split clone" }
+        }
+        finally {
+            if ($null -ne $previousPythonPath) { $env:PYTHONPATH = $previousPythonPath }
+            else { Remove-Item Env:\PYTHONPATH -ErrorAction SilentlyContinue }
+            Remove-Item Env:\QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+        }
     }
     else {
         Write-Warning "no interpreter available in the clone; skipped schema and unit checks"
