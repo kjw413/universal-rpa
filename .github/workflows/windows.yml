@@ -1,0 +1,63 @@
+name: windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # GitHub-hosted. This job has no interactive desktop, so it MUST deselect
+  # windows_e2e and must never be described as native input or focus coverage.
+  hosted-checks:
+    name: hosted checks (no native input coverage)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: python -m ruff check src tests samples scripts
+
+      - name: Format
+        run: python -m ruff format --check src tests samples scripts
+
+      - name: Types
+        run: python -m mypy src
+
+      - name: Workflow schema is current
+        run: python scripts/export_schema.py --check
+
+      - name: Unit, contract, offscreen UI, and noninteractive integration tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests -m "not windows_e2e and not mis_pilot" -q
+
+  # Self-hosted, logged in, unlocked. This is the only job that may claim native
+  # input and focus coverage.
+  interactive-e2e:
+    name: interactive Windows E2E
+    runs-on: [self-hosted, windows, x64, rpa-interactive]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Interactive harness suite
+        env:
+          RPA_INTERACTIVE_DESKTOP: "1"
+        run: python -m pytest tests/integration/windows -m windows_e2e -q

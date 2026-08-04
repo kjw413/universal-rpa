@@ -9,7 +9,9 @@ description = "Deterministic local Windows RPA Studio"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-  "PySide6>=6.8,<7",
+  # Pinned exactly: this is the tested Windows build toolchain. A packaged
+  # release is only signed off against these versions.
+  "PySide6==6.11.1",
   "pydantic>=2.10,<3",
   "pynput>=1.7.7,<2",
   "pywinauto==0.6.9",
@@ -27,6 +29,15 @@ dev = [
   "pytest-qt>=4.4,<5",
   "ruff>=0.9,<1",
 ]
+build = [
+  "Nuitka==4.1.3",
+]
+
+# Consumed by pyside6-project/pyside6-deploy. The entry point is the only file
+# listed; Nuitka follows the imports from there and must not be pointed at the
+# tests, samples, or scripts trees.
+[tool.pyside6-project]
+files = ["src/universal_rpa/__main__.py"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

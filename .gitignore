@@ -1,6 +1,9 @@
 .venv/
 build/
 dist/
+# pyside6-deploy stages the Nuitka build beside the entry point before copying
+# the executable into dist/.
+deployment/
 *.spec~
 .pytest_cache/
 .mypy_cache/

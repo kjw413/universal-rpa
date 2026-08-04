@@ -46,7 +46,7 @@ def test_full_flow_preflights_runs_and_projects_one_safe_report(
     workflow = scenario_workflow("click")
     session = harness_session(harness, workflow)
 
-    validation = services.validation_service.validate(session.workflow)
+    validation = services.validation_service.validate_static(session.workflow)
     preflight = execution.preflight(build_run_request(harness, workflow, validation_only=True))
     outcome = run_harness_workflow_detailed("click", harness, services=services)
 
