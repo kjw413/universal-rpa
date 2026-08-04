@@ -18,7 +18,11 @@ from universal_rpa.application.conditions import (
 )
 from universal_rpa.application.loops import DataSourceSnapshot, LoopPlanner
 from universal_rpa.application.preflight import PreflightService
-from universal_rpa.application.resume import ResumeFingerprintBuilder, ResumeValidator
+from universal_rpa.application.resume import (
+    ResumeCompatibility,
+    ResumeFingerprintBuilder,
+    ResumeValidator,
+)
 from universal_rpa.application.run_control import RunControl
 from universal_rpa.application.value_resolution import ValueResolver
 from universal_rpa.application.variable_preparation import (
@@ -272,6 +276,113 @@ class ExecutionService:
                 started,
                 RpaError(ErrorCode.INTERNAL_ERROR, "실행 중 내부 오류가 발생했습니다."),
             )
+
+    def discover_resumable(self, request: RunRequest) -> tuple[ResumeCompatibility, ...]:
+        """Classify every stored checkpoint for this workflow, newest first.
+
+        Discovery is read-only: it rebuilds the current fingerprint with the same
+        builder the runner uses, but writes no checkpoint, journal, or output.
+        """
+
+        try:
+            checkpoints = self._checkpoints.discover_active(request.workflow.workflow_id)
+        except RpaError:
+            return ()
+        if not checkpoints:
+            return ()
+        try:
+            snapshots = self._loop_planner.materialize_snapshots(
+                request.project_dir, request.workflow
+            )
+            _, runtime = self._preflight.inspect(request)
+        except RpaError as error:
+            return tuple(
+                self._refused(checkpoint, error.code, error.safe_message)
+                for checkpoint in checkpoints
+            )
+        return tuple(
+            self._classify(request, checkpoint, snapshots, runtime) for checkpoint in checkpoints
+        )
+
+    def _classify(
+        self,
+        request: RunRequest,
+        checkpoint: Checkpoint,
+        snapshots: FrozenMapping[str, DataSourceSnapshot],
+        runtime: RuntimeEnvironment | None,
+    ) -> ResumeCompatibility:
+        try:
+            date_context = DateContext(
+                today=date.fromisoformat(checkpoint.date_context_today),
+                run_date=date.fromisoformat(checkpoint.date_context_run_date),
+            )
+        except ValueError:
+            return self._refused(
+                checkpoint,
+                ErrorCode.CHECKPOINT_INVALID,
+                "재개 날짜 정보가 올바르지 않습니다.",
+            )
+        try:
+            journal = self._journals.load(request.workflow.workflow_id, checkpoint.run_id)
+        except RpaError as error:
+            return self._refused(checkpoint, error.code, error.safe_message)
+        if journal is not None and any(not action.idempotent for action in journal.actions):
+            return self._refused(
+                checkpoint,
+                ErrorCode.RESUME_UNSAFE,
+                "중단된 비멱등 작업이 있어 수동 확인이 필요합니다.",
+            )
+        try:
+            prepared = self._variable_preparation.prepare(
+                request.workflow,
+                request.inputs,
+                request.project_dir,
+                date_context,
+                snapshots,
+                self._secret_store,
+            )
+            current = self._fingerprint(request, prepared, snapshots, runtime)
+        except RpaError as error:
+            return self._refused(checkpoint, error.code, error.safe_message)
+        mismatch = self._resume_validator.compare(checkpoint.fingerprint, current)
+        if mismatch:
+            return self._refused(
+                checkpoint,
+                ErrorCode.RESUME_MISMATCH,
+                "업무 정의·실행 입력·데이터 또는 실행 환경이 바뀌어 재개할 수 없습니다.",
+                mismatch,
+            )
+        try:
+            self._resume_validator.validate_outputs(
+                checkpoint.output_commits, request.inputs.output_directory
+            )
+        except RpaError as error:
+            return self._refused(checkpoint, error.code, error.safe_message, ("output",))
+        return ResumeCompatibility(
+            workflow_id=checkpoint.workflow_id,
+            run_id=checkpoint.run_id,
+            resumable=True,
+            completed_cursor=checkpoint.completed_cursor,
+            updated_at=checkpoint.updated_at,
+        )
+
+    @staticmethod
+    def _refused(
+        checkpoint: Checkpoint,
+        code: ErrorCode,
+        safe_message: str,
+        mismatch_fields: tuple[str, ...] = (),
+    ) -> ResumeCompatibility:
+        return ResumeCompatibility(
+            workflow_id=checkpoint.workflow_id,
+            run_id=checkpoint.run_id,
+            resumable=False,
+            completed_cursor=checkpoint.completed_cursor,
+            updated_at=checkpoint.updated_at,
+            error_code=code,
+            safe_message=safe_message,
+            mismatch_fields=mismatch_fields,
+        )
 
     def step_test_eligibility(self, request: StepTestRequest) -> StepTestEligibility:
         located = self._find_action_path(request.run_request.workflow.steps, request.step_id)
@@ -930,6 +1041,7 @@ class ExecutionService:
 
 __all__ = [
     "ExecutionService",
+    "ResumeCompatibility",
     "RunActionObserved",
     "RunObserver",
     "RunStarted",

@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from uuid import UUID
 
 from universal_rpa.adapters.registry import AdapterRegistry
 from universal_rpa.application.loops import DataSourceSnapshot
 from universal_rpa.application.variable_preparation import PreparedVariables
 from universal_rpa.application.workflow_codec import dump_workflow
 from universal_rpa.domain.errors import ErrorCode, RpaError
-from universal_rpa.domain.results import OutputCommit
+from universal_rpa.domain.results import LoopCursor, OutputCommit
 from universal_rpa.domain.targets import RuntimeEnvironment
 from universal_rpa.domain.types import FrozenMapping
 from universal_rpa.domain.workflow import IfPresentStep, LoopStep, Step, Workflow
@@ -145,7 +147,45 @@ class ResumeFingerprintBuilder:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ResumeCompatibility:
+    """Whether one stored checkpoint may be resumed, and why not when it may not.
+
+    The three refusal codes are deliberately distinct: ``RESUME_UNSAFE`` is an
+    interrupted non-idempotent iteration that a human must inspect,
+    ``RESUME_MISMATCH`` is a changed workflow/input/data/adapter/environment or
+    output, and ``CHECKPOINT_INVALID`` is unreadable state.
+    """
+
+    workflow_id: UUID
+    run_id: UUID
+    resumable: bool
+    completed_cursor: tuple[LoopCursor, ...] = ()
+    updated_at: datetime | None = None
+    error_code: ErrorCode | None = None
+    safe_message: str = ""
+    mismatch_fields: tuple[str, ...] = ()
+
+
+#: Public, stable field names reported for a fingerprint difference.
+FINGERPRINT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("workflow", "workflow_sha256"),
+    ("inputs", "resolved_inputs_sha256"),
+    ("data", "data_sources"),
+    ("adapter", "adapters"),
+    ("environment", "environment_sha256"),
+    ("output", "output_root_sha256"),
+)
+
+
 class ResumeValidator:
+    def compare(self, stored: ResumeFingerprint, current: ResumeFingerprint) -> tuple[str, ...]:
+        return tuple(
+            name
+            for name, attribute in FINGERPRINT_FIELDS
+            if getattr(stored, attribute) != getattr(current, attribute)
+        )
+
     def validate_fingerprint(self, stored: ResumeFingerprint, current: ResumeFingerprint) -> None:
         if stored != current:
             raise RpaError(
@@ -174,4 +214,9 @@ class ResumeValidator:
                 )
 
 
-__all__ = ["ResumeFingerprintBuilder", "ResumeValidator"]
+__all__ = [
+    "FINGERPRINT_FIELDS",
+    "ResumeCompatibility",
+    "ResumeFingerprintBuilder",
+    "ResumeValidator",
+]

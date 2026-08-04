@@ -61,7 +61,8 @@ def _hook_time_ms() -> int:
     return int(time.monotonic() * 1000)
 
 
-_MODIFIER_NAMES = {
+#: Maps every pynput modifier spelling onto the canonical chord modifier name.
+MODIFIER_ALIASES = {
     "alt": "alt",
     "alt_l": "alt",
     "alt_r": "alt",
@@ -77,7 +78,7 @@ _MODIFIER_NAMES = {
 }
 
 
-def _key_name_and_text(key: object) -> tuple[str, str | None]:
+def normalize_key(key: object) -> tuple[str, str | None]:
     char = getattr(key, "char", None)
     if isinstance(char, str) and char:
         return char.casefold(), char
@@ -151,8 +152,8 @@ class PynputInputCapture:
         self._suppressed_keys.clear()
 
     def _on_press(self, key: object) -> None:
-        key_name, text = _key_name_and_text(key)
-        modifier = _MODIFIER_NAMES.get(key_name)
+        key_name, text = normalize_key(key)
+        modifier = MODIFIER_ALIASES.get(key_name)
         if modifier is not None:
             self._pressed_modifiers.add(modifier)
 
@@ -166,12 +167,12 @@ class PynputInputCapture:
         self._emit_keyboard(RawEventType.KEY_DOWN, key_name, text)
 
     def _on_release(self, key: object) -> None:
-        key_name, text = _key_name_and_text(key)
+        key_name, text = normalize_key(key)
         if key_name in self._suppressed_keys:
             self._suppressed_keys.discard(key_name)
         else:
             self._emit_keyboard(RawEventType.KEY_UP, key_name, text)
-        modifier = _MODIFIER_NAMES.get(key_name)
+        modifier = MODIFIER_ALIASES.get(key_name)
         if modifier is not None:
             self._pressed_modifiers.discard(modifier)
 
@@ -255,4 +256,10 @@ class PynputInputCapture:
         )
 
 
-__all__ = ["ListenerFactory", "ListenerPort", "PynputInputCapture"]
+__all__ = [
+    "MODIFIER_ALIASES",
+    "ListenerFactory",
+    "ListenerPort",
+    "PynputInputCapture",
+    "normalize_key",
+]

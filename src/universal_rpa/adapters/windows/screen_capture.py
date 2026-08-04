@@ -62,9 +62,7 @@ class Win32ExactWindowCapture:
             bitmap = win32ui.CreateBitmap()
             bitmap.CreateCompatibleBitmap(source_dc, geometry.width, geometry.height)
             memory_dc.SelectObject(bitmap)
-            printed = ctypes.windll.user32.PrintWindow(
-                hwnd, memory_dc.GetSafeHdc(), PW_CLIENTONLY
-            )
+            printed = ctypes.windll.user32.PrintWindow(hwnd, memory_dc.GetSafeHdc(), PW_CLIENTONLY)
             if not printed:
                 return None
             info = bitmap.GetInfo()

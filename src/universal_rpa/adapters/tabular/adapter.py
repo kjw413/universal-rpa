@@ -210,9 +210,7 @@ class TabularAutomationAdapter:
                 )
             table = request.value
             if not isinstance(table, TableData):
-                raise RpaError(
-                    ErrorCode.INVALID_SCHEMA, "표 저장 작업에는 추출된 표가 필요합니다."
-                )
+                raise RpaError(ErrorCode.INVALID_SCHEMA, "표 저장 작업에는 추출된 표가 필요합니다.")
             spec = _spec_from_parameters(request.parameters)
             commit = self._writer.save(
                 table,
@@ -295,9 +293,7 @@ class TabularAutomationAdapter:
         return ConditionObservation(
             satisfied=stable,
             observed=stable,
-            evidence=FrozenMapping(
-                (("exists", True), ("size", current.size), ("stable", stable))
-            ),
+            evidence=FrozenMapping((("exists", True), ("size", current.size), ("stable", stable))),
         )
 
     def evaluate_assertion(

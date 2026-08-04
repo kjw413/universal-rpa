@@ -178,9 +178,7 @@ def test_selector_only_target_uses_observed_pid_hwnd_without_reresolution(
 
 
 @pytest.mark.parametrize("field", ["process_id", "top_level_hwnd", "client_size"])
-def test_runtime_identity_or_client_basis_mismatch_fails_closed(
-    tmp_path: Path, field: str
-) -> None:
+def test_runtime_identity_or_client_basis_mismatch_fails_closed(tmp_path: Path, field: str) -> None:
     runtime = runtime_environment()
     overrides: dict[str, object] = {
         "process_id": {"process_id": 42},

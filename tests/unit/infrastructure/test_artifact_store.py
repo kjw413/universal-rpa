@@ -88,9 +88,7 @@ def failed_result() -> ActionResult:
 
 
 def observed_action(*, result: ActionResult) -> RunActionObserved:
-    return RunActionObserved(
-        result=result, target=windows_target(), runtime=runtime_environment()
-    )
+    return RunActionObserved(result=result, target=windows_target(), runtime=runtime_environment())
 
 
 def run_report(*, results: tuple[ActionResult, ...], status: str) -> RunReport:

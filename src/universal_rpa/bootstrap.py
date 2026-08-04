@@ -53,6 +53,7 @@ from universal_rpa.infrastructure.sensitive_regions import SensitiveRegionProvid
 from universal_rpa.infrastructure.target_preview_store import TargetPreviewStore
 from universal_rpa.ports.capture import ControlSink, InputCapturePort, InputEventSink
 from universal_rpa.ports.context import WindowContextPort
+from universal_rpa.ports.credentials import SecretStorePort
 from universal_rpa.ports.data_sources import DataSourcePort
 from universal_rpa.ports.repositories import RecordingStorePort
 
@@ -168,6 +169,7 @@ class AppServices:
     execution_service: ExecutionService | None = None
     report_projector: ReportProjector = field(default_factory=ReportProjector)
     artifact_store: RunArtifactStore | None = None
+    secret_store: SecretStorePort | None = None
     startup_warnings: tuple[str, ...] = ()
 
 
@@ -315,6 +317,7 @@ def build_services(
         execution_service=execution_service,
         report_projector=projector,
         artifact_store=artifact_store,
+        secret_store=secret_store,
         startup_warnings=tuple(warnings),
     )
 

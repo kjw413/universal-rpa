@@ -19,23 +19,23 @@ from PySide6.QtWidgets import (
 from universal_rpa.application.projects import ProjectSession
 from universal_rpa.bootstrap import AppServices
 from universal_rpa.domain.errors import ValidationReport
+from universal_rpa.ports.credentials import SecretStorePort, SecretValue
 from universal_rpa.ui.editor_page import WorkflowEditor
 from universal_rpa.ui.project_home import ProjectHome
 from universal_rpa.ui.recorder_page import RecorderPage
+from universal_rpa.ui.report_page import ReportPage
+from universal_rpa.ui.runner_page import RunnerPage
 
 
-def _placeholder(title: str, message: str) -> QWidget:
-    page = QWidget()
-    layout = QVBoxLayout(page)
-    heading = QLabel(title)
-    heading.setObjectName("page-title")
-    body = QLabel(message)
-    body.setWordWrap(True)
-    body.setEnabled(False)
-    layout.addWidget(heading)
-    layout.addWidget(body)
-    layout.addStretch(1)
-    return page
+class _NoCredentialStore:
+    """Fail-closed stand-in when no platform credential store is available."""
+
+    def exists(self, reference: str) -> bool:
+        del reference
+        return False
+
+    def read(self, reference: str) -> SecretValue:
+        raise KeyError(reference)
 
 
 class MainWindow(QMainWindow):
@@ -74,8 +74,14 @@ class MainWindow(QMainWindow):
             preview_store=services.preview_store,
             privacy_service=services.recording_privacy,
         )
-        self.runner_page = _placeholder("실행", "실행 기능은 M4에서 활성화됩니다.")
-        self.report_page = _placeholder("보고서", "실행 보고서는 M5에서 활성화됩니다.")
+        secret_store: SecretStorePort = services.secret_store or _NoCredentialStore()
+        self.runner_page = RunnerPage(
+            services.execution_service,
+            secret_store,
+            artifact_store=services.artifact_store,
+            report_projector=services.report_projector,
+        )
+        self.report_page = ReportPage()
 
         page_widgets = (
             self.project_page,
@@ -112,6 +118,7 @@ class MainWindow(QMainWindow):
         self.recorder_page.recording_completed.connect(self.editor_page.remember_recording_result)
         self.recorder_page.candidates_reviewed.connect(self.editor_page.apply_command)
         self.editor_page.edit_requested.connect(self._editor_changed)
+        self.runner_page.run_finished.connect(self._show_report)
         self.navigation.setCurrentRow(0)
 
         if services.startup_warnings:
@@ -159,8 +166,15 @@ class MainWindow(QMainWindow):
         self.session = session
         self.project_page.show_session(session)
         self.editor_page.set_session(session)
+        self.runner_page.set_session(session)
         self.statusBar().showMessage(f"프로젝트 열림: {session.workflow.name}")
         return True
+
+    @Slot(object)
+    def _show_report(self, document: object) -> None:
+        self.report_page.set_report(document)
+        self.navigation.setCurrentRow(len(self._PAGE_DEFINITIONS) - 1)
+        self.statusBar().showMessage("실행 보고서를 확인하세요.")
 
     def show_validation(self, report: ValidationReport) -> None:
         self.editor_page.show_validation(report)

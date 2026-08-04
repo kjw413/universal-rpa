@@ -117,8 +117,7 @@ class FailureScreenshotService:
             # PySide6 accepts only ``str`` here; its stub declares ``bytes``.
             if not image.save(buffer, "PNG"):  # type: ignore[call-overload]
                 raise OSError("masked capture could not be encoded")
-            payload: bytes = buffer.data().data()
-            return payload
+            return bytes(buffer.data().data())
         finally:
             buffer.close()
 

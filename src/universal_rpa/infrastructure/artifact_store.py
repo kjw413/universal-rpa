@@ -93,9 +93,7 @@ class RunArtifactStore:
             / f"failure-{self._failure_index:03d}.png"
         )
         try:
-            written = self._screenshots.capture_failure(
-                event.target, event.runtime, destination
-            )
+            written = self._screenshots.capture_failure(event.target, event.runtime, destination)
         except Exception:
             return
         if written is not None:
