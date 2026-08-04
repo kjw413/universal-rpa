@@ -30,6 +30,7 @@
 ```json
 {
   "required_headers": ["공장", "기간", "생산수량"],
+  "required_header_order": ["공장", "기간", "생산수량"],
   "required_token_sha256": "<승인 토큰 문자열의 SHA-256>",
   "minimum_rows": 1,
   "allowed_output_root": "C:/UniversalRPA-Pilot/output",
@@ -39,6 +40,14 @@
 
 > `required_token_sha256`은 승인 토큰 **원문의** SHA-256이다. 원문은 이 저장소나
 > 증거 문서 어디에도 기록하지 않는다.
+
+`required_header_order`는 선택 항목이지만 **넣기를 권장한다**. 헤더 digest는 순서
+있는 행을 덮는 반면 `required_headers`는 집합이므로, 순서를 적지 않으면 게이트는
+승인된 열의 **모든 배열**을 통과시킨다. 순서를 적으면 정확히 그 한 행만 통과한다.
+
+승인 열이 8개를 넘고 `required_header_order`가 없으면 게이트는 배열을 열거할 수
+없어 `header_order_unpinned`로 실패한다. 이때 문제는 MIS 내보내기가 아니라 정책
+파일이므로, 열을 고치지 말고 정책에 순서를 적는다.
 
 ## 1. 감독 실행 순서
 
@@ -149,6 +158,7 @@ UNC(`\\server\share`), 드라이브 문자(`C:`), 장치 이름(`CON`, `NUL`)은
 | `validation_only` | 검증 실행이 성공이 아니거나 action을 실행했다 |
 | `step_test_scope` | 한 공장·한 기간이 아니다 |
 | `required_headers` / `required_token` | 정책 해시와 불일치한다 |
+| `header_order_unpinned` | 승인 열이 8개를 넘는데 `required_header_order`가 없다 (열이 아니라 정책 파일을 고친다) |
 | `minimum_rows` | 행 수가 최소치 미달이다 |
 | `output_root_containment` | 출력이 승인 root 밖이다 |
 | `output_commit_invalid` | commit되지 않았거나 digest가 유효하지 않다 |

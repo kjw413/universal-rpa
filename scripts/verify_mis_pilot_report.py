@@ -85,6 +85,10 @@ FORBIDDEN_FIELD_NAMES = frozenset(
 #: digest cannot be a path, and `token_sha256` is required evidence.
 _DIGEST_FIELD_NAMES = frozenset({"headers_sha256", "sha256", "token_sha256"})
 
+#: Above this many approved columns, enumerating orders stops being tractable
+#: (8! = 40320 and it grows factorially), so the policy must pin the order.
+_MAX_PERMUTED_HEADERS = 7
+
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 #: Windows device names, which name a device rather than a file even with a suffix.
@@ -104,6 +108,11 @@ class PilotPolicy:
     minimum_rows: int
     allowed_output_root: Path
     workflow_revision: int
+    #: Optional exact approved column order. The header digest covers an ordered
+    #: row, so pinning the order makes the comparison exact instead of accepting
+    #: any arrangement of the approved set. Required once the set grows past
+    #: ``_MAX_PERMUTED_HEADERS``, where enumerating orders stops being tractable.
+    required_header_order: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,7 +368,14 @@ def _check_step_test(document: Mapping[str, Any], policy: PilotPolicy, findings:
     if int(document.get("factory_count", -1)) != 1 or int(document.get("period_count", -1)) != 1:
         findings.add("step_test_scope")
 
-    if str(document.get("headers_sha256", "")) not in _acceptable_header_digests(policy):
+    acceptable = _acceptable_header_digests(policy)
+    if acceptable is None:
+        # Distinct from `required_headers`: the columns may well be correct, but
+        # the policy has not said which order counts and the set is too large to
+        # enumerate. Reporting the header mismatch here would send the operator
+        # looking at their MIS export when the fix is in the policy file.
+        findings.add("header_order_unpinned")
+    elif str(document.get("headers_sha256", "")) not in acceptable:
         findings.add("required_headers")
 
     if str(document.get("token_sha256", "")) != policy.required_token_sha256:
@@ -376,18 +392,28 @@ def canonical_header_hash(headers: Sequence[str]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _acceptable_header_digests(policy: PilotPolicy) -> frozenset[str]:
-    """Header digests for the approved column set.
+def _acceptable_header_digests(policy: PilotPolicy) -> frozenset[str] | None:
+    """Header digests for the approved column set, or ``None`` when unknowable.
 
     ``required_headers`` is a set, but the digest covers an *ordered* row, so the
-    policy alone cannot fix the order.  Rather than guess, accept the digest of
-    any permutation -- for a handful of approved columns this is a small, bounded
-    set, and it still rejects a bundle whose columns differ at all.
+    set alone cannot fix the order.  A policy that pins ``required_header_order``
+    gets an exact one-digest comparison.  Otherwise, for a handful of approved
+    columns, accept the digest of any permutation: still bounded, and it rejects
+    a bundle whose columns differ at all.
+
+    Past ``_MAX_PERMUTED_HEADERS`` neither is possible, and this returns ``None``
+    rather than quietly falling back to alphabetical order.  That fallback would
+    reject a perfectly good bundle from any MIS that does not happen to export
+    its columns sorted, and would blame the headers for a gap in the policy.
     """
 
+    if policy.required_header_order is not None:
+        if set(policy.required_header_order) != set(policy.required_headers):
+            return frozenset()
+        return frozenset({canonical_header_hash(list(policy.required_header_order))})
     headers = sorted(policy.required_headers)
-    if len(headers) > 7:  # pragma: no cover - policies are small by construction
-        return frozenset({canonical_header_hash(headers)})
+    if len(headers) > _MAX_PERMUTED_HEADERS:
+        return None
     return frozenset(canonical_header_hash(list(order)) for order in permutations(headers))
 
 
@@ -581,12 +607,14 @@ def render_pilot_summary(result: PilotGateResult, expected_os: str) -> str:
 
 def _load_policy(path: Path) -> PilotPolicy:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    order = payload.get("required_header_order")
     return PilotPolicy(
         required_headers=frozenset(payload["required_headers"]),
         required_token_sha256=str(payload["required_token_sha256"]).casefold(),
         minimum_rows=int(payload["minimum_rows"]),
         allowed_output_root=Path(payload["allowed_output_root"]),
         workflow_revision=int(payload["workflow_revision"]),
+        required_header_order=tuple(str(item) for item in order) if order is not None else None,
     )
 
 

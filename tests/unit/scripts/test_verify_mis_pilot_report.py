@@ -652,3 +652,92 @@ def test_failures_are_reported_sorted_and_deduplicated(tmp_path: Path) -> None:
     )
 
     assert result.failures == tuple(sorted(set(result.failures)))
+
+
+# --------------------------------------------------------------------------- #
+# Approved header order
+# --------------------------------------------------------------------------- #
+
+
+def test_any_order_of_the_approved_columns_is_accepted_when_order_is_unpinned(
+    tmp_path: Path,
+) -> None:
+    documents = default_documents()
+    documents["step_test_report"]["headers_sha256"] = canonical_header_digest(
+        ("생산수량", "공장", "기간")
+    )
+
+    result = verify_pilot_bundle(
+        write_bundle(tmp_path, documents=documents), pilot_policy(), "windows-11-x64"
+    )
+
+    assert "required_headers" not in result.failures
+
+
+def test_a_pinned_order_accepts_only_that_exact_column_row(tmp_path: Path) -> None:
+    documents = default_documents()
+    documents["step_test_report"]["headers_sha256"] = canonical_header_digest(REQUIRED_HEADERS)
+    policy = pilot_policy(required_header_order=REQUIRED_HEADERS)
+
+    result = verify_pilot_bundle(
+        write_bundle(tmp_path, documents=documents), policy, "windows-11-x64"
+    )
+
+    assert "required_headers" not in result.failures
+
+
+def test_a_pinned_order_rejects_a_different_arrangement_of_the_same_columns(
+    tmp_path: Path,
+) -> None:
+    documents = default_documents()
+    documents["step_test_report"]["headers_sha256"] = canonical_header_digest(
+        ("생산수량", "공장", "기간")
+    )
+    policy = pilot_policy(required_header_order=REQUIRED_HEADERS)
+
+    result = verify_pilot_bundle(
+        write_bundle(tmp_path, documents=documents), policy, "windows-11-x64"
+    )
+
+    assert not result.ok
+    assert "required_headers" in result.failures
+
+
+def test_a_pinned_order_that_disagrees_with_the_approved_set_accepts_nothing(
+    tmp_path: Path,
+) -> None:
+    policy = pilot_policy(required_header_order=("공장", "기간", "다른열"))
+
+    result = verify_pilot_bundle(write_complete_bundle(tmp_path), policy, "windows-11-x64")
+
+    assert not result.ok
+    assert "required_headers" in result.failures
+
+
+def test_too_many_unpinned_columns_reports_the_policy_gap_not_a_header_mismatch(
+    tmp_path: Path,
+) -> None:
+    """Blaming the headers would send the operator to the wrong file."""
+
+    wide = frozenset({f"열{index}" for index in range(9)})
+    policy = pilot_policy(required_headers=wide)
+
+    result = verify_pilot_bundle(write_complete_bundle(tmp_path), policy, "windows-11-x64")
+
+    assert not result.ok
+    assert "header_order_unpinned" in result.failures
+    assert "required_headers" not in result.failures
+
+
+def test_pinning_the_order_makes_a_wide_column_set_verifiable(tmp_path: Path) -> None:
+    wide = tuple(f"열{index}" for index in range(9))
+    documents = default_documents()
+    documents["step_test_report"]["headers_sha256"] = canonical_header_digest(wide)
+    policy = pilot_policy(required_headers=frozenset(wide), required_header_order=wide)
+
+    result = verify_pilot_bundle(
+        write_bundle(tmp_path, documents=documents), policy, "windows-11-x64"
+    )
+
+    assert "header_order_unpinned" not in result.failures
+    assert "required_headers" not in result.failures
