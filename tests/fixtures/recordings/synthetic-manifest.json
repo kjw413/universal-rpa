@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "tests/fixtures/recordings/ctrl-a-date-enter/events.jsonl",
-      "sha256": "1e214482b354ec8f1b393025a8f1460f75f9e8d0951dc9b76c9c48ed881750a4"
+      "sha256": "1d9d90e003aa13717240eb3d6997977fbb4df32f4986c8c98c90435314a16d40"
     }
   ]
 }

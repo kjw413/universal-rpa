@@ -139,3 +139,29 @@ def test_the_real_repository_carries_no_customer_or_runtime_artifact() -> None:
     found = scan_repository_for_runtime_artifacts(REPOSITORY_ROOT)
 
     assert found == (), "\n".join(str(path) for path in found)
+
+
+def test_manifested_fixtures_are_byte_pinned_against_eol_conversion() -> None:
+    """A hash allowlist cannot survive git rewriting line endings on checkout.
+
+    If ``.gitattributes`` let git normalize these fixtures, a Windows checkout
+    would hold CRLF bytes that no longer hash to the committed digest, and the
+    fail-closed scan would report the one file it is meant to allow as a customer
+    artifact.  ``-text`` is what keeps the digest platform-independent.
+    """
+
+    attributes = (REPOSITORY_ROOT / ".gitattributes").read_text(encoding="utf-8")
+
+    assert "tests/fixtures/recordings/**/*.jsonl -text" in attributes
+
+
+def test_every_manifested_recording_hashes_over_lf_only_bytes() -> None:
+    """The committed digests must be taken over the bytes git actually stores."""
+
+    manifest = json.loads(
+        (REPOSITORY_ROOT / SYNTHETIC_MANIFEST_RELATIVE_PATH).read_text(encoding="utf-8")
+    )
+
+    for entry in manifest["files"]:
+        recording = REPOSITORY_ROOT / entry["path"]
+        assert b"\r\n" not in recording.read_bytes(), entry["path"]
