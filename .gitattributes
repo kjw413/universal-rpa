@@ -1,1 +1,13 @@
 docs/schemas/*.json text eol=lf
+
+# Synthetic recording fixtures are byte-pinned, not text.
+#
+# scripts/repository_hygiene.py permits a .jsonl only when
+# tests/fixtures/recordings/synthetic-manifest.json lists it AND its bytes still
+# hash to the listed SHA-256. A hash allowlist and end-of-line normalization are
+# fundamentally incompatible: if git rewrote LF to CRLF on checkout, the working
+# tree bytes would no longer match the committed digest and the fail-closed scan
+# would report the one fixture it is supposed to allow as a customer artifact.
+# `-text` disables eol conversion in both directions, so every platform sees the
+# exact bytes the digest was taken over.
+tests/fixtures/recordings/**/*.jsonl -text
