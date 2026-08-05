@@ -17,6 +17,41 @@ Set-StrictMode -Version Latest
 $forbiddenRoots = @("recordings", "artifacts", "projects", ".superpowers", "tests", "samples")
 $forbiddenModules = @("tests", "samples", "scripts")
 
+function Invoke-PackagedMode {
+    <#
+        Run one verification mode and return what it actually reported.
+
+        The packaged binary is a GUI-subsystem app -- pysidedeploy.spec builds it
+        with --windows-console-mode=disable -- so `& $exe` hands it off without
+        waiting, never sets $LASTEXITCODE, and leaves the mode's JSON report with
+        no stdout to print to. Start-Process waits for the real exit code, and
+        redirecting the streams gives the report somewhere to go, so this checks
+        the answer instead of the launch.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Exe,
+        [Parameter(Mandatory)] [string[]] $Arguments,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    $out = New-TemporaryFile
+    $err = New-TemporaryFile
+    try {
+        $process = Start-Process -FilePath $Exe -ArgumentList $Arguments -Wait -PassThru `
+            -RedirectStandardOutput $out.FullName -RedirectStandardError $err.FullName
+        foreach ($stream in @($out, $err)) {
+            $text = Get-Content -Raw -Path $stream.FullName -ErrorAction SilentlyContinue
+            if ($text) { Write-Output $text.TrimEnd() }
+        }
+        if ($process.ExitCode -ne 0) {
+            throw "$Label exited $($process.ExitCode)"
+        }
+    }
+    finally {
+        Remove-Item -Force -Path $out.FullName, $err.FullName -ErrorAction SilentlyContinue
+    }
+}
+
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $distPath = Join-Path $repositoryRoot $DistRoot
 if (-not (Test-Path $distPath)) {
@@ -57,12 +92,10 @@ try {
     Remove-Item Env:\PYTHONPATH -ErrorAction SilentlyContinue
 
     Write-Output "== --self-check =="
-    & $exe --self-check
-    if ($LASTEXITCODE -ne 0) { throw "--self-check exited $LASTEXITCODE" }
+    Invoke-PackagedMode -Exe $exe -Arguments @("--self-check") -Label "--self-check"
 
     Write-Output "== --packaged-smoke =="
-    & $exe --packaged-smoke $smokeRoot
-    if ($LASTEXITCODE -ne 0) { throw "--packaged-smoke exited $LASTEXITCODE" }
+    Invoke-PackagedMode -Exe $exe -Arguments @("--packaged-smoke", $smokeRoot) -Label "--packaged-smoke"
 
     Write-Output "both packaged modes exited 0 from an empty CWD with no PYTHONPATH"
 }

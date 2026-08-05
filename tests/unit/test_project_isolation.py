@@ -72,6 +72,37 @@ print(json.dumps({
     assert payload["loaded_forbidden_modules"] == []
 
 
+def test_importing_bootstrap_does_not_drag_in_the_native_stack() -> None:
+    """Building services is a runtime act; importing the module is not.
+
+    pywinauto's UIA definitions build a COM pattern registry as an import side
+    effect, so a module-level import of them reaches everything that imports
+    bootstrap. That is what makes it worth pinning: the packaged build resolves
+    comtypes submodules dynamically, so the eager import crashed the executable
+    on startup, long before any recording could ask for a UIA element.
+    """
+
+    probe = """
+import json
+import sys
+
+import universal_rpa.bootstrap
+
+forbidden = {"pywinauto", "comtypes", "pynput"}
+print(json.dumps(sorted(forbidden & sys.modules.keys())))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        check=False,
+        cwd=PROJECT_ROOT,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == []
+
+
 def test_source_import_graph_has_no_undeclared_parent_modules() -> None:
     for source in (PROJECT_ROOT / "src" / "universal_rpa").rglob("*.py"):
         tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))

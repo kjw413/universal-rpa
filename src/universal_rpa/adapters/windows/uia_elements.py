@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from pywinauto.uia_defines import get_elem_interface  # type: ignore[import-untyped]
-
 
 class UiaElementView:
     def __init__(self, info: object) -> None:
@@ -63,6 +61,14 @@ class UiaElementView:
         if element is None:
             return None
         try:
+            # Imported here, not at module scope: importing pywinauto's UIA
+            # definitions builds its COM pattern registry as a side effect, so
+            # a module-level import drags the whole native stack into anything
+            # that merely imports bootstrap -- which broke startup outright in
+            # the packaged build, where comtypes resolves its submodules
+            # dynamically.
+            from pywinauto.uia_defines import get_elem_interface  # type: ignore[import-untyped]
+
             pattern = get_elem_interface(element, "Value")
             value = pattern.CurrentValue
         except Exception:

@@ -67,6 +67,14 @@ try {
     # snapshot it and restore it however the build ends.
     $specPath = Join-Path $repositoryRoot "pysidedeploy.spec"
     $specBackup = Get-Content -Raw -Path $specPath
+    # Nuitka has to be able to import the application package to follow any of
+    # its imports, and it cannot here by default: pyside6-deploy above may be
+    # the base interpreter's console script, while the editable install's .pth
+    # that puts src on sys.path lives only in the venv. Without this Nuitka
+    # resolves nothing from line one of __main__.py and ships a bundle holding
+    # only the CPython runtime -- which still exits 0 and looks like a build.
+    $previousPythonPath = $env:PYTHONPATH
+    $env:PYTHONPATH = Join-Path $repositoryRoot "src"
     try {
         Write-Output "== deploy dry run =="
         & $deploy -c pysidedeploy.spec --dry-run --force
@@ -80,6 +88,12 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "pyside6-deploy build failed" }
     }
     finally {
+        if ($null -eq $previousPythonPath) {
+            Remove-Item Env:\PYTHONPATH -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:PYTHONPATH = $previousPythonPath
+        }
         Set-Content -Path $specPath -Value $specBackup -NoNewline
         Remove-Item -Recurse -Force (Join-Path $repositoryRoot "src\universal_rpa\deployment") -ErrorAction SilentlyContinue
     }
