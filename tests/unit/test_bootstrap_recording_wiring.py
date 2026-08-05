@@ -21,11 +21,13 @@ from universal_rpa.domain.recording import (
     EventFocusSnapshot,
     NativeInputEvent,
     RawEventType,
+    RawInputEvent,
     RecordingTarget,
     SensitiveKeyToken,
     enrich_and_sanitize_event,
 )
 from universal_rpa.domain.types import thaw_json
+from universal_rpa.ports.context import CapturedEventContext
 
 NOW = datetime(2026, 8, 5, 9, 0, tzinfo=UTC)
 
@@ -40,6 +42,7 @@ class _FakeElement:
     bounds: tuple[int, int, int, int] = (100, 100, 300, 140)
     editable: bool = True
     is_password: bool = False
+    value: str | None = None
 
 
 class _WorkingFakeUiaFacade:
@@ -97,16 +100,23 @@ class _FakeWin32:
         return "DISPLAY1"
 
 
-def test_a_keyboard_event_with_a_resolved_target_is_not_redacted() -> None:
-    """(A)와 (B)를 함께 덮는다: 둘 중 하나만 고치면 이 테스트는 실패한다."""
-    runtime_id = (11, 22, 33)
+_RUNTIME_ID = (11, 22, 33)
 
-    # (B): the focus poller published a runtime id for the focused element.
+
+def _resolve_one_keystroke(
+    element: _FakeElement,
+    *,
+    key: str = "a",
+) -> tuple[CapturedEventContext, RawInputEvent]:
+    """One key_down through the shipped capture -> sanitize pipeline, with both
+    halves working: (A) a facade that resolves elements and (B) a focus
+    snapshot carrying the runtime id to resolve."""
+
     published_focus = EventFocusSnapshot(
         foreground_hwnd=101,
         focused_hwnd=101,
         foreground_process_id=4242,
-        cached_uia_runtime_id=runtime_id,
+        cached_uia_runtime_id=_RUNTIME_ID,
         focus_event_time_ms=500,
         cache_generation=1,
         cache_confirmed=True,
@@ -123,34 +133,31 @@ def test_a_keyboard_event_with_a_resolved_target_is_not_redacted() -> None:
         )
     )
     cache.publish(published_focus)
-
-    # (A): a facade that can actually resolve the published runtime id.
-    facade = _WorkingFakeUiaFacade({runtime_id: _FakeElement(runtime_id=runtime_id)})
     context = WindowsWindowContext(
         win32=_FakeWin32(),
-        uia=facade,
+        uia=_WorkingFakeUiaFacade({_RUNTIME_ID: element}),
         focus_cache=cache,
         settle_timeout_seconds=0,
     )
-    target = RecordingTarget(
-        process_id=4242,
-        process_executable="notepad.exe",
-        top_level_hwnd=101,
-        window_title="Untitled",
-        window_class="Notepad",
-    )
-    key_token = SensitiveKeyToken.create(key="a", text="a")
     event = NativeInputEvent(
         monotonic_ns=10,
         wall_time_utc=NOW,
         hook_time_ms=500,
         event_type=RawEventType.KEY_DOWN,
         focus=published_focus,
-        payload={"key": "a"},
-        key_token=key_token,
+        payload={"key": key},
+        key_token=SensitiveKeyToken.create(key=key, text=key),
     )
-
-    captured = context.capture_context(event, target)
+    captured = context.capture_context(
+        event,
+        RecordingTarget(
+            process_id=4242,
+            process_executable="notepad.exe",
+            top_level_hwnd=101,
+            window_title="Untitled",
+            window_class="Notepad",
+        ),
+    )
     raw = enrich_and_sanitize_event(
         event,
         session_id=uuid4(),
@@ -159,9 +166,51 @@ def test_a_keyboard_event_with_a_resolved_target_is_not_redacted() -> None:
         environment=captured.environment_snapshot,
         in_scope=captured.in_scope,
     )
+    return captured, raw
+
+
+def test_a_keyboard_event_with_a_resolved_target_is_not_redacted() -> None:
+    """(A)와 (B)를 함께 덮는다: 둘 중 하나만 고치면 이 테스트는 실패한다."""
+
+    captured, raw = _resolve_one_keystroke(_FakeElement(runtime_id=_RUNTIME_ID))
 
     assert captured.target_snapshot is not None
     assert thaw_json(raw.payload) == {"key": "a", "text": "a"}
+
+
+def test_a_password_field_keystroke_stays_redacted_even_though_it_resolves() -> None:
+    """M6 made this check load-bearing for the first time.
+
+    Before live resolution every keystroke was masked, so a typed password was
+    safe by accident. Now that resolving a target reveals the key, is_password
+    is the only thing between a password and the stored recording.
+    """
+
+    captured, raw = _resolve_one_keystroke(
+        _FakeElement(runtime_id=_RUNTIME_ID, is_password=True),
+        key="s",
+    )
+
+    assert captured.target_snapshot is not None
+    assert captured.target_snapshot.is_password is True
+    assert thaw_json(raw.payload) == {"redacted": True}
+
+
+def test_a_password_fields_value_is_never_read_into_the_snapshot() -> None:
+    secret, _ = _resolve_one_keystroke(
+        _FakeElement(runtime_id=_RUNTIME_ID, is_password=True, value="hunter2")
+    )
+    ordinary, _ = _resolve_one_keystroke(
+        _FakeElement(runtime_id=_RUNTIME_ID, value="hunter2")
+    )
+
+    # The ordinary field proves the value really is readable here, so the
+    # password field's None is the masking working rather than a fake that
+    # never had a value to leak.
+    assert ordinary.target_snapshot is not None
+    assert ordinary.target_snapshot.observed_value == "hunter2"
+    assert secret.target_snapshot is not None
+    assert secret.target_snapshot.observed_value is None
 
 
 def test_a_missing_runtime_id_still_redacts_even_with_a_working_facade() -> None:
