@@ -423,9 +423,19 @@ def _scenario_password_masking(identity: HarnessIdentity) -> Workflow:
 
 
 def _scenario_drag_scroll_hotkey(identity: HarnessIdentity) -> Workflow:
+    """Drag, scroll, then a window-level hotkey.
+
+    The hotkey is aimed at a button rather than a text field on purpose. A
+    ``QLineEdit`` handles Ctrl+A itself, so the harness's window shortcut --
+    the thing that increments ``hotkey_count`` -- never sees it once the key
+    is delivered to the control the step names. Targeting a field made this
+    scenario pass only while keys leaked to whatever else held focus.
+    """
+
     drag = identity.target(DRAG_SURFACE_ID)
     scroll = identity.target(SCROLL_SURFACE_ID)
     normal = identity.target(NORMAL_TEXT_ID)
+    hotkey_host = identity.target(CLICK_BUTTON_ID)
     return harness_workflow(
         "드래그·스크롤·단축키",
         action(
@@ -451,9 +461,9 @@ def _scenario_drag_scroll_hotkey(identity: HarnessIdentity) -> Workflow:
         action(
             "windows.hotkey",
             label="전체 선택",
-            target=normal,
+            target=hotkey_host,
             parameters={"key": "a", "modifiers": ["ctrl"]},
-            postcondition=element_exists(normal),
+            postcondition=element_exists(hotkey_host),
         ),
         window_class=identity.window_class,
     )
