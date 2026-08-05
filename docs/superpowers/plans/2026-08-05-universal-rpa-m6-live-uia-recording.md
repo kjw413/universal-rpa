@@ -68,14 +68,14 @@ M5 대화형 E2E를 처음 실행하면서 발견됐다. 증거 체인:
 
 pywinauto의 `UIAElementInfo`는 `rectangle`을 노출하고 `bounds`/`bounding_rectangle`은 노출하지 않으므로 번역이 필요하다. `is_password`는 COM 요소의 `CurrentIsPassword`에서 읽는다.
 
-- [ ] **Step 1: 각 속성 매핑과 누락 시 안전한 기본값에 대한 실패 테스트 작성**
+- [x] **Step 1: 각 속성 매핑과 누락 시 안전한 기본값에 대한 실패 테스트 작성**
 
 `is_password`를 읽을 수 없을 때 `True`로 간주해 fail-closed 되는지 반드시 고정한다.
 
-- [ ] **Step 2: 테스트 실패 확인** (`ModuleNotFoundError`)
-- [ ] **Step 3: `UiaElementView` 구현**
-- [ ] **Step 4:** `.\.venv\Scripts\python.exe -m pytest tests/unit/adapters/windows/test_uia_elements.py -q`
-- [ ] **Step 5: 커밋**
+- [x] **Step 2: 테스트 실패 확인** (`ModuleNotFoundError`)
+- [x] **Step 3: `UiaElementView` 구현**
+- [x] **Step 4:** `.\.venv\Scripts\python.exe -m pytest tests/unit/adapters/windows/test_uia_elements.py -q`
+- [x] **Step 5: 커밋**
 
 ---
 
@@ -92,7 +92,7 @@ pywinauto의 `UIAElementInfo`는 `rectangle`을 노출하고 `bounds`/`bounding_
 
 세 메서드 모두 실패 시 예외 대신 빈 결과를 반환한다. `element_from_runtime_id`는 runtime id로 요소를 찾고, 반환 요소의 runtime id가 요청과 다르면 `None`을 반환한다(`capture_context`가 이미 이 검증을 하지만, 어댑터에서도 확인해 재사용된 id를 걸러낸다).
 
-- [ ] **Step 1: 실패·불일치·타임아웃 경로 테스트 작성**
+- [x] **Step 1: 실패·불일치·타임아웃 경로 테스트 작성**
 
 ```python
 def test_a_reused_runtime_id_resolves_to_nothing() -> None: ...
@@ -101,10 +101,10 @@ def test_password_elements_are_reported_for_masking() -> None: ...
 def test_resolution_gives_up_within_its_budget() -> None: ...
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
-- [ ] **Step 3: 구현.** COM 초기화는 스레드별 1회, 조회 예산 초과 시 `None`.
-- [ ] **Step 4:** 단위 테스트 + `mypy src`
-- [ ] **Step 5: 커밋**
+- [x] **Step 2: 테스트 실패 확인**
+- [x] **Step 3: 구현.** COM 초기화는 스레드별 1회, 조회 예산 초과 시 `None`.
+- [x] **Step 4:** 단위 테스트 + `mypy src`
+- [x] **Step 5: 커밋**
 
 ---
 
@@ -119,7 +119,7 @@ def test_resolution_gives_up_within_its_budget() -> None: ...
 
 `_FocusPollingCapture._publish_focus`가 현재 `cached_uia_runtime_id=None`을 발행한다. 포커스된 요소의 runtime id를 조회해 실으면 `capture_context`가 `element_from_runtime_id`를 호출하게 된다.
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 ```python
 def test_focus_snapshot_carries_the_focused_element_runtime_id() -> None: ...
@@ -127,10 +127,10 @@ def test_a_uia_failure_publishes_a_snapshot_without_a_runtime_id() -> None: ...
 def test_focus_polling_never_blocks_on_uia_longer_than_its_budget() -> None: ...
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
-- [ ] **Step 3: 구현.** 조회는 폴링 스레드에서만; 입력 훅 콜백 안에서는 하지 않는다.
-- [ ] **Step 4:** `pytest tests/unit -q`
-- [ ] **Step 5: 커밋**
+- [x] **Step 2: 테스트 실패 확인**
+- [x] **Step 3: 구현.** 조회는 폴링 스레드에서만; 입력 훅 콜백 안에서는 하지 않는다.
+- [x] **Step 4:** `pytest tests/unit -q`
+- [x] **Step 5: 커밋**
 
 ---
 
@@ -144,7 +144,7 @@ def test_focus_polling_never_blocks_on_uia_longer_than_its_budget() -> None: ...
 
 **이것이 (A) 결함의 수정이다.**
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 ```python
 def test_production_bootstrap_wires_a_real_uia_facade() -> None:
@@ -159,10 +159,10 @@ def test_a_keyboard_event_with_a_resolved_target_is_not_redacted() -> None:
 
 두 번째 테스트가 이 계획의 **핵심 회귀 방지선**이다. 가짜 UIA 파사드와 가짜 포커스 소스로 실제 창 없이 검증한다.
 
-- [ ] **Step 2: 테스트 실패 확인**
-- [ ] **Step 3: `_CoordinateOnlyUia` 제거하고 `PywinautoUiaFacade` 배선**
-- [ ] **Step 4:** 전체 비대화형 스위트 + ruff + mypy
-- [ ] **Step 5: 커밋**
+- [x] **Step 2: 테스트 실패 확인**
+- [x] **Step 3: `_CoordinateOnlyUia` 제거하고 `PywinautoUiaFacade` 배선**
+- [x] **Step 4:** 전체 비대화형 스위트 + ruff + mypy
+- [x] **Step 5: 커밋**
 
 ---
 
@@ -172,7 +172,7 @@ def test_a_keyboard_event_with_a_resolved_target_is_not_redacted() -> None:
 
 - Modify: `tests/integration/windows/test_recorder_editor_roundtrip.py`
 
-- [ ] **Step 1:** 전용 세션에서 실행
+- [x] **Step 1:** 전용 세션에서 실행
 
 ```powershell
 $env:RPA_INTERACTIVE_DESKTOP = "1"
@@ -183,7 +183,7 @@ $env:RPA_INTERACTIVE_DESKTOP = "1"
 
 > ⚠️ **잠금 해제된 전용 데스크톱이 필요하다.** 사용 중인 데스크톱에서는 harness가 포그라운드를 잡지 못해 결과가 무의미하다. M5에서 동일 코드가 7~11개 통과로 흔들린 것이 이 때문이다.
 
-- [ ] **Step 2:** 비밀번호 필드 입력이 여전히 마스킹되는지 확인 — 이 계획이 **완화하면 안 되는** 불변식이다.
+- [x] **Step 2:** 비밀번호 필드 입력이 여전히 마스킹되는지 확인 — 이 계획이 **완화하면 안 되는** 불변식이다.
 
 ---
 
@@ -194,6 +194,20 @@ $env:RPA_INTERACTIVE_DESKTOP = "1"
 - 비밀번호 필드 입력은 어떤 경로로도 저장되지 않는다.
 - 전용 세션에서 recorder → editor → preflight → runner → report 왕복이 통과한다.
 - `_CoordinateOnlyUia`가 저장소에 남아 있지 않다.
+
+## 실행 결과: 계획에 없던 세 건을 함께 고쳐야 통과했다
+
+(A)와 (B)를 고치자 마스킹이 풀리면서, 그동안 **도달조차 못 했던 코드 경로**들이 처음 실행됐고 거기서 결함이 드러났다. 셋 다 M6 이전에는 관측될 수 없었던 것들이다.
+
+| 결함 | 증상 | 커밋 |
+|---|---|---|
+| Ctrl+글자가 ASCII 제어 코드로 기록됨 | `key='\x01'`로 `HotkeyParameters` 검증 실패 | `a7d2d42` |
+| 마스킹된 key-up이 보조 키를 "눌린 채"로 남김 | 무관한 Enter가 `windows.hotkey`로 오인 | `7fbb889` |
+| `press_key`/`hotkey`가 대상에 포커스를 주지 않음 | 날짜 필드 대상 Ctrl+A가 **일반 텍스트 필드**를 전체 선택 | `a828453` |
+
+세 번째는 `fdd07c9`(drag/scroll)와 같은 계열의 제품 결함이다 — 대상을 지정한 동작은 그 대상에 수행돼야 한다. 실제 녹화 기록이 증거였다: Ctrl+A 이벤트의 `automation_id`가 `...normalText`였다.
+
+**추가로 드러난 테스트 설계 결함(`7d3f765`):** `record_edit_run`이 워크플로 재생으로 녹화용 입력을 만들었는데, `windows.set_text`는 UIA 값 주입이라 **키 입력을 하나도 만들지 않는다.** 따라서 텍스트 입력 녹화를 증명하려던 시나리오가 녹화기에게 아무것도 보여주지 못했고, 3-액션 기대치는 구조적으로 도달 불가능했다(`dropped_event_count: 0`, `incomplete: false`로 확인). 녹화 단계만 실제 타이핑으로 교체했다. 키 입력마다 UIA 왕복이 단일 워커에서 처리되므로 입력에 간격이 필요하다 — 더 빠르면 마스킹되어 텍스트가 두 후보로 쪼개진다.
 
 ## 참고: 함께 발견됐으나 이 계획의 범위가 아닌 것
 
