@@ -40,14 +40,28 @@ class _Rectangle:
 class _Element:
     """A UIA element shaped like the ones pywinauto returns."""
 
-    def __init__(self, rectangle: _Rectangle | None = None, *, raises: bool = False) -> None:
+    def __init__(
+        self,
+        rectangle: _Rectangle | None = None,
+        *,
+        raises: bool = False,
+        focus_raises: bool = False,
+        journal: list[str] | None = None,
+    ) -> None:
         self._rectangle = rectangle or _Rectangle(100, 200, 300, 400)
         self._raises = raises
+        self._focus_raises = focus_raises
+        self.journal = journal if journal is not None else []
 
     def rectangle(self) -> _Rectangle:
         if self._raises:
             raise RuntimeError("the element went away")
         return self._rectangle
+
+    def set_focus(self) -> None:
+        if self._focus_raises:
+            raise RuntimeError("the element cannot take focus")
+        self.journal.append("focus")
 
 
 class _PermissiveGuard:
@@ -78,12 +92,31 @@ class _SpyMouse:
         self.calls.append(("scroll", kwargs))
 
 
+class _SpyKeyboard:
+    def __init__(self) -> None:
+        #: Shared with the element under test so ordering is observable.
+        self.journal: list[str] = []
+
+    def send_keys(self, keys: str, **kwargs: Any) -> None:
+        del kwargs
+        self.journal.append(f"send:{keys}")
+
+
 @pytest.fixture
 def mouse(monkeypatch: pytest.MonkeyPatch) -> _SpyMouse:
     spy = _SpyMouse()
     module = type("_PywinautoModule", (), {"mouse": spy})
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", module)
     monkeypatch.setitem(__import__("sys").modules, "pywinauto.mouse", spy)
+    return spy
+
+
+@pytest.fixture
+def keyboard(monkeypatch: pytest.MonkeyPatch) -> _SpyKeyboard:
+    spy = _SpyKeyboard()
+    module = type("_PywinautoModule", (), {"keyboard": spy})
+    monkeypatch.setitem(__import__("sys").modules, "pywinauto", module)
+    monkeypatch.setitem(__import__("sys").modules, "pywinauto.keyboard", spy)
     return spy
 
 
@@ -182,3 +215,58 @@ def test_scroll_fails_closed_rather_than_scrolling_an_unknown_point(
 
     assert error.value.code is ErrorCode.ACTION_FAILED
     assert mouse.calls == []
+
+
+def test_press_key_focuses_the_addressed_element_before_sending(
+    keyboard: _SpyKeyboard,
+) -> None:
+    """send_keys goes wherever focus already is, so a key aimed at one control
+    otherwise lands in whatever the window happened to focus."""
+
+    driver = WindowsInputDriver(_PermissiveGuard())  # type: ignore[arg-type]
+    element = _Element(journal=keyboard.journal)
+
+    driver.press_key(_uia_target(element), "enter")
+
+    assert keyboard.journal == ["focus", "send:{ENTER}"]
+
+
+def test_hotkey_focuses_the_addressed_element_before_sending(
+    keyboard: _SpyKeyboard,
+) -> None:
+    """Observed live: Ctrl+A aimed at the date field selected the *normal text*
+    field instead, because the keys were sent globally to whatever had focus."""
+
+    driver = WindowsInputDriver(_PermissiveGuard())  # type: ignore[arg-type]
+    element = _Element(journal=keyboard.journal)
+
+    driver.press_key(_uia_target(element), "a", modifiers=("ctrl",))
+
+    assert keyboard.journal == ["focus", "send:^a"]
+
+
+def test_press_key_refuses_rather_than_typing_into_an_unknown_control(
+    keyboard: _SpyKeyboard,
+) -> None:
+    """If the addressed element cannot take focus we cannot honour the target,
+    and typing anyway could enter text into whatever else is focused."""
+
+    driver = WindowsInputDriver(_PermissiveGuard())  # type: ignore[arg-type]
+
+    with pytest.raises(RpaError) as error:
+        driver.press_key(_uia_target(_Element(focus_raises=True)), "a", modifiers=("ctrl",))
+
+    assert error.value.code is ErrorCode.ACTION_FAILED
+    assert keyboard.journal == []
+
+
+def test_press_key_on_a_coordinate_target_sends_without_an_element_to_focus(
+    keyboard: _SpyKeyboard,
+) -> None:
+    """A guarded coordinate fallback has no element; it must still work."""
+
+    driver = WindowsInputDriver(_PermissiveGuard())  # type: ignore[arg-type]
+
+    driver.press_key(_coordinate_target(), "enter")
+
+    assert keyboard.journal == ["send:{ENTER}"]

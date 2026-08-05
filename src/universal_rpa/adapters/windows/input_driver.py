@@ -116,10 +116,33 @@ class WindowsInputDriver:
         except Exception:
             raise RpaError(ErrorCode.ACTION_FAILED, "스크롤 입력을 수행할 수 없습니다.") from None
 
+    @staticmethod
+    def _focus_element(target: ResolvedTarget) -> None:
+        """Put focus on the addressed element before any keystroke.
+
+        ``send_keys`` delivers to whatever already holds focus, so without this
+        a key aimed at one control lands wherever the window happened to focus
+        -- ``activate`` only raises the top-level window, not the element. This
+        is the keyboard counterpart of the drag/scroll defect: an action that
+        names a target must act on that target.
+        """
+
+        if not isinstance(target, ResolvedUiaTarget):
+            return
+        try:
+            cast(Any, target.element).set_focus()
+        except Exception:
+            # Typing anyway would enter the keys into an unknown control, which
+            # is the more damaging of the two failures.
+            raise RpaError(
+                ErrorCode.ACTION_FAILED, "키를 보낼 대상에 포커스를 줄 수 없습니다."
+            ) from None
+
     def press_key(
         self, target: ResolvedTarget, key: str, *, modifiers: tuple[str, ...] = ()
     ) -> None:
         self._guard.verify(self._identity(target))
+        self._focus_element(target)
         try:
             from pywinauto import keyboard
 
