@@ -298,6 +298,15 @@ def normalize_keyboard_events(
         key, text = _key_and_text(event)
         if key is None:
             flush_groups()
+            if event.event_type is RawEventType.KEY_UP and modifiers:
+                # A release we can't identify (masked because its target
+                # momentarily failed confirmation) might have been a held
+                # modifier's release. We can no longer prove any of them are
+                # still down, so stop treating later keys as part of a chord
+                # rather than risk a modifier stuck "held" for the rest of
+                # the session.
+                modifiers.clear()
+                modifier_sources.clear()
             continue
         modifier = _modifier_name(key)
         if event.event_type is RawEventType.KEY_UP:

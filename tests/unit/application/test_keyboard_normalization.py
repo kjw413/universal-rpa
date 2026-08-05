@@ -94,6 +94,79 @@ def keyboard_event(
     )
 
 
+def _redacted_key_up(
+    *,
+    event_number: int,
+    monotonic_ms: int,
+    runtime_id: tuple[int, ...] = (1, 2, 3),
+) -> RawInputEvent:
+    """A key-up whose target could not be confirmed at that instant, exactly
+    as capture_context/enrich_and_sanitize_event would mask it -- the
+    identity of the released key is unknown, which is what makes this case
+    dangerous for modifier bookkeeping."""
+    return RawInputEvent.model_validate(
+        {
+            "session_id": SESSION_ID,
+            "event_id": UUID(int=event_number),
+            "monotonic_ns": monotonic_ms * 1_000_000,
+            "wall_time_utc": NOW,
+            "event_type": RawEventType.KEY_UP,
+            "payload": {"redacted": True},
+            "in_scope": True,
+            "capture_state": "recording",
+            "window_context": WindowContextSnapshot(
+                foreground_hwnd=100,
+                focused_hwnd=101,
+                process_id=200,
+                process_executable="mis.exe",
+                top_level_hwnd=100,
+                window_title="MIS",
+                window_class="MainFrame",
+                focused_runtime_id=runtime_id,
+                selected_top_level_hwnd=100,
+                owned_by_selected_window=True,
+                context_confident=False,
+            ),
+            "target_snapshot": None,
+            "environment_snapshot": RecordingEnvironmentSnapshot(
+                client_left=0,
+                client_top=0,
+                client_width=1000,
+                client_height=1000,
+                dpi_x=96,
+                dpi_y=96,
+                monitor_scale=1.0,
+                monitor_id="DISPLAY1",
+                double_click_time_ms=500,
+                drag_width_px=4,
+                drag_height_px=4,
+            ),
+        }
+    )
+
+
+def test_a_masked_modifier_release_does_not_leave_ctrl_stuck_forever() -> None:
+    """Observed live: the 'a'/'ctrl' key-up events momentarily failed target
+    confirmation and were masked, losing their identity. A later, unrelated
+    Enter press must not inherit a 'ctrl' modifier that was actually released
+    -- otherwise it is wrongly recorded as a Ctrl-hotkey for the rest of the
+    session instead of a plain key press."""
+    events = (
+        keyboard_event("ctrl", event_number=1, monotonic_ms=0, editable=False),
+        keyboard_event("a", event_number=2, monotonic_ms=10, text="a", editable=False),
+        _redacted_key_up(event_number=3, monotonic_ms=20),
+        _redacted_key_up(event_number=4, monotonic_ms=30),
+        keyboard_event("enter", event_number=5, monotonic_ms=200),
+    )
+
+    result = normalize_keyboard_events(events)
+
+    assert [candidate.action_type for candidate in result.candidates] == [
+        "windows.hotkey",
+        "windows.press_key",
+    ]
+
+
 def ctrl_a_date_enter() -> tuple[RawInputEvent, ...]:
     events: list[RawInputEvent] = [
         keyboard_event("ctrl", event_number=1, monotonic_ms=0, editable=False),
