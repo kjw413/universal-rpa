@@ -50,9 +50,41 @@ class WindowsInputDriver:
         except Exception:
             raise RpaError(ErrorCode.ACTION_FAILED, "마우스 입력을 수행할 수 없습니다.") from None
 
+    @staticmethod
+    def _element_centre(element: object) -> tuple[int, int] | None:
+        """The midpoint of a UIA element's screen rectangle, when it has one."""
+
+        try:
+            rectangle = cast(Any, element).rectangle()
+            left = int(rectangle.left)
+            top = int(rectangle.top)
+            right = int(rectangle.right)
+            bottom = int(rectangle.bottom)
+        except Exception:
+            return None
+        if right <= left or bottom <= top:
+            return None
+        return (left + right) // 2, (top + bottom) // 2
+
+    @classmethod
+    def _pointer_target(cls, target: ResolvedTarget) -> tuple[int, int] | None:
+        """Where the pointer must be for a drag or a scroll to mean anything.
+
+        A coordinate target already carries its recorded point.  A UIA target
+        carries an element, whose rectangle midpoint is the equivalent -- without
+        this, drag and scroll would only ever work through the guarded coordinate
+        fallback, which is the exception rather than the normal path.
+        """
+
+        if isinstance(target, ResolvedCoordinateTarget):
+            return target.screen_point
+        if isinstance(target, ResolvedUiaTarget):
+            return cls._element_centre(target.element)
+        return None
+
     def drag(self, target: ResolvedTarget, end: tuple[int, int], button: str = "left") -> None:
         self._guard.verify(self._identity(target))
-        start = target.screen_point if isinstance(target, ResolvedCoordinateTarget) else None
+        start = self._pointer_target(target)
         if start is None:
             raise RpaError(ErrorCode.ACTION_FAILED, "UIA 대상의 드래그 좌표를 확인할 수 없습니다.")
         try:
@@ -70,7 +102,11 @@ class WindowsInputDriver:
 
     def scroll(self, target: ResolvedTarget, horizontal: int, vertical: int) -> None:
         self._guard.verify(self._identity(target))
-        point = target.screen_point if isinstance(target, ResolvedCoordinateTarget) else None
+        point = self._pointer_target(target)
+        if point is None:
+            # Scrolling wherever the pointer happens to be would move whatever is
+            # under it, which is worse than refusing the step.
+            raise RpaError(ErrorCode.ACTION_FAILED, "UIA 대상의 스크롤 좌표를 확인할 수 없습니다.")
         try:
             from pywinauto import mouse
 
