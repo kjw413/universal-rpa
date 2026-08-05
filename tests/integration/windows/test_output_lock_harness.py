@@ -109,7 +109,7 @@ def test_a_completed_run_marks_its_checkpoint_terminal(harness: HarnessProcess) 
 
 @pytest.mark.windows_e2e
 def test_discovery_finds_no_resumable_state_after_success(harness: HarnessProcess) -> None:
-    from tests.integration.windows.helpers import build_run_request, scenario_workflow
+    from tests.integration.windows.helpers import build_run_request, harness_scenario
 
     services = production_services(harness)
     execution = services.execution_service
@@ -117,7 +117,7 @@ def test_discovery_finds_no_resumable_state_after_success(harness: HarnessProces
     run_harness_workflow("clipboard-table", harness, services=services)
 
     found = execution.discover_resumable(
-        build_run_request(harness, scenario_workflow("clipboard-table"))
+        build_run_request(harness, harness_scenario("clipboard-table", harness))
     )
 
     assert all(not candidate.resumable for candidate in found)

@@ -52,7 +52,10 @@ from universal_rpa.domain.workflow import (
 )
 
 HARNESS_EXECUTABLE = "python.exe"
-HARNESS_WINDOW_CLASS = "Qt6...QWindowIcon"
+#: Used only when no live window is available. The real class is read from the
+#: running harness, because a Qt class name embeds the Qt version and the
+#: environment guard compares it exactly.
+FALLBACK_WINDOW_CLASS = "QtHarnessWindow"
 HARNESS_WINDOW_TITLE = "Universal RPA Test Harness"
 NOW = datetime(2026, 7, 27, tzinfo=UTC)
 
@@ -125,7 +128,7 @@ def action(
     )
 
 
-def harness_workflow(name: str, *steps: Step) -> Workflow:
+def harness_workflow(name: str, *steps: Step, window_class: str) -> Workflow:
     return Workflow(
         workflow_id=uuid4(),
         name=name,
@@ -134,7 +137,7 @@ def harness_workflow(name: str, *steps: Step) -> Workflow:
             TargetAppSpec(
                 app_id="harness",
                 process_executable=HARNESS_EXECUTABLE,
-                window_class=HARNESS_WINDOW_CLASS,
+                window_class=window_class,
                 window_title=HARNESS_WINDOW_TITLE,
             ),
         ),
@@ -147,7 +150,7 @@ def harness_workflow(name: str, *steps: Step) -> Workflow:
 # -- scenarios -----------------------------------------------------------------
 
 
-def _scenario_click() -> Workflow:
+def _scenario_click(window_class: str) -> Workflow:
     target = harness_target(CLICK_BUTTON_ID)
     return harness_workflow(
         "클릭",
@@ -158,10 +161,11 @@ def _scenario_click() -> Workflow:
             target=target,
             postcondition=element_exists(target),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_duplicate_selector() -> Workflow:
+def _scenario_duplicate_selector(window_class: str) -> Workflow:
     target = harness_target(DUPLICATE_BUTTON_ID)
     return harness_workflow(
         "중복 선택자",
@@ -176,10 +180,11 @@ def _scenario_duplicate_selector() -> Workflow:
             target=target,
             postcondition=element_exists(target),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_uia_after_move() -> Workflow:
+def _scenario_uia_after_move(window_class: str) -> Workflow:
     target = harness_target(CLICK_BUTTON_ID)
     return harness_workflow(
         "이동 후 UIA",
@@ -190,10 +195,11 @@ def _scenario_uia_after_move() -> Workflow:
             target=target,
             postcondition=element_exists(target),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_coordinate_fallback() -> Workflow:
+def _scenario_coordinate_fallback(window_class: str) -> Workflow:
     """A coordinate fallback recorded at the pre-resize client size.
 
     After the harness is resized past the 2 % tolerance the guard must refuse the
@@ -207,7 +213,7 @@ def _scenario_coordinate_fallback() -> Workflow:
                 "selector": None,
                 "coordinate_fallback": {
                     "recorded_process_executable": HARNESS_EXECUTABLE,
-                    "recorded_window_class": HARNESS_WINDOW_CLASS,
+                    "recorded_window_class": window_class,
                     "point": {"x": 0.25, "y": 0.25},
                     "recorded_dpi_x": 96,
                     "recorded_dpi_y": 96,
@@ -225,10 +231,11 @@ def _scenario_coordinate_fallback() -> Workflow:
             target=target,
             assertions=(value_equals("unreachable"),),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_delayed_element() -> Workflow:
+def _scenario_delayed_element(window_class: str) -> Workflow:
     delayed = harness_target(DELAYED_CONTROL_ID)
     return harness_workflow(
         "지연 요소",
@@ -243,10 +250,11 @@ def _scenario_delayed_element() -> Workflow:
             target=delayed,
             postcondition=element_exists(delayed),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_intentional_timeout() -> Workflow:
+def _scenario_intentional_timeout(window_class: str) -> Workflow:
     delayed = harness_target(DELAYED_CONTROL_ID)
     return harness_workflow(
         "의도적 시간 초과",
@@ -255,10 +263,11 @@ def _scenario_intentional_timeout() -> Workflow:
             label="나타나지 않는 요소 대기",
             wait=element_exists(delayed, timeout_ms=1_000),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_modal() -> Workflow:
+def _scenario_modal(window_class: str) -> Workflow:
     opener = harness_target(OPEN_MODAL_BUTTON_ID)
     closer = harness_target(MODAL_CLOSE_BUTTON_ID)
     return harness_workflow(
@@ -276,10 +285,11 @@ def _scenario_modal() -> Workflow:
             target=closer,
             postcondition=element_exists(opener),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_korean_verification() -> Workflow:
+def _scenario_korean_verification(window_class: str) -> Workflow:
     korean = harness_target(KOREAN_TEXT_ID)
     return harness_workflow(
         "한글 검증",
@@ -291,10 +301,11 @@ def _scenario_korean_verification() -> Workflow:
             value=LiteralValue(value=SYNTHETIC_KOREAN),
             assertions=(value_equals(SYNTHETIC_KOREAN),),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_password_masking() -> Workflow:
+def _scenario_password_masking(window_class: str) -> Workflow:
     password = password_target()
     return harness_workflow(
         "비밀번호 마스킹",
@@ -305,10 +316,11 @@ def _scenario_password_masking() -> Workflow:
             target=harness_target("missingControl"),
             postcondition=element_exists(harness_target("missingControl"), timeout_ms=1_000),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_drag_scroll_hotkey() -> Workflow:
+def _scenario_drag_scroll_hotkey(window_class: str) -> Workflow:
     drag = harness_target(DRAG_SURFACE_ID)
     scroll = harness_target(SCROLL_SURFACE_ID)
     normal = harness_target(NORMAL_TEXT_ID)
@@ -336,10 +348,11 @@ def _scenario_drag_scroll_hotkey() -> Workflow:
             parameters={"key": "a", "modifiers": ["ctrl"]},
             postcondition=element_exists(normal),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_double_click() -> Workflow:
+def _scenario_double_click(window_class: str) -> Workflow:
     target = harness_target(DOUBLE_CLICK_BUTTON_ID)
     return harness_workflow(
         "더블클릭",
@@ -350,10 +363,11 @@ def _scenario_double_click() -> Workflow:
             target=target,
             postcondition=element_exists(target),
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_clipboard_table(output: str = "harness/table.csv") -> Workflow:
+def _scenario_clipboard_table(window_class: str, output: str = "harness/table.csv") -> Workflow:
     copy_button = harness_target(COPY_TABLE_BUTTON_ID)
     extract_id = uuid4()
     return harness_workflow(
@@ -378,10 +392,11 @@ def _scenario_clipboard_table(output: str = "harness/table.csv") -> Workflow:
             input_step_id=extract_id,
             parameters={"format": "csv", "relative_path": OutputRelativePath(output).root},
         ),
+        window_class=window_class,
     )
 
 
-def _scenario_ctrl_a_date_enter() -> Workflow:
+def _scenario_ctrl_a_date_enter(window_class: str) -> Workflow:
     date_field = harness_target(DATE_TEXT_ID)
     return harness_workflow(
         "Ctrl+A 날짜 Enter",
@@ -407,6 +422,7 @@ def _scenario_ctrl_a_date_enter() -> Workflow:
             parameters={"key": "enter", "modifiers": []},
             postcondition=element_exists(date_field),
         ),
+        window_class=window_class,
     )
 
 
@@ -427,12 +443,20 @@ SCENARIOS: dict[str, object] = {
 }
 
 
-def scenario_workflow(name: str) -> Workflow:
+def scenario_workflow(name: str, window_class: str = FALLBACK_WINDOW_CLASS) -> Workflow:
+    """Build one named scenario against a specific live window class."""
+
     try:
         builder = SCENARIOS[name]
     except KeyError:
         raise KeyError(f"unknown harness scenario: {name}") from None
-    return builder()  # type: ignore[operator]
+    return builder(window_class)  # type: ignore[operator]
+
+
+def harness_scenario(name: str, harness: HarnessProcess) -> Workflow:
+    """Build a scenario bound to the class of the *running* harness window."""
+
+    return scenario_workflow(name, harness.window_class)
 
 
 # -- production wiring ---------------------------------------------------------
@@ -503,7 +527,7 @@ def run_harness_workflow_detailed(
     execution = resolved.execution_service
     if execution is None:
         raise RuntimeError("production execution service is unavailable")
-    workflow = scenario_workflow(scenario)
+    workflow = harness_scenario(scenario, harness)
     request = build_run_request(harness, workflow)
     observers = (resolved.artifact_store,) if resolved.artifact_store is not None else ()
     report = execution.run(request, control or RunControl(), observers)  # type: ignore[arg-type]
@@ -531,7 +555,7 @@ def recording_target(harness: HarnessProcess) -> RecordingTarget:
         process_executable=HARNESS_EXECUTABLE,
         top_level_hwnd=harness.top_level_hwnd,
         window_title=HARNESS_WINDOW_TITLE,
-        window_class=HARNESS_WINDOW_CLASS,
+        window_class=harness.window_class,
     )
 
 
@@ -559,7 +583,7 @@ def record_edit_run(
     normalization = resolved.normalization_service.normalize_session(
         resolved.recording_store, session.session_id
     )
-    workflow = scenario_workflow(scenario)
+    workflow = harness_scenario(scenario, harness)
     outcome = run_harness_workflow_detailed(scenario, harness, services=resolved)
     return RecordEditRunResult(
         normalization=normalization,
@@ -575,7 +599,7 @@ def drive_scenario(scenario: str, harness: HarnessProcess, services: AppServices
     execution = services.execution_service
     if execution is None:
         raise RuntimeError("production execution service is unavailable")
-    workflow = scenario_workflow(scenario)
+    workflow = harness_scenario(scenario, harness)
     request = build_run_request(harness, workflow)
     execution.run(request, RunControl())
 
@@ -605,7 +629,7 @@ def _unknown_runtime() -> object:
         process_executable=HARNESS_EXECUTABLE,
         top_level_hwnd=0,
         window_title=HARNESS_WINDOW_TITLE,
-        window_class=HARNESS_WINDOW_CLASS,
+        window_class=FALLBACK_WINDOW_CLASS,
         foreground_hwnd=0,
         dpi_x=96,
         dpi_y=96,
@@ -620,8 +644,8 @@ def output_path(harness: HarnessProcess, relative: str) -> Path:
 
 
 __all__ = [
+    "FALLBACK_WINDOW_CLASS",
     "HARNESS_EXECUTABLE",
-    "HARNESS_WINDOW_CLASS",
     "HARNESS_WINDOW_TITLE",
     "SCENARIOS",
     "HarnessRunOutcome",
@@ -630,6 +654,7 @@ __all__ = [
     "build_run_request",
     "drive_scenario",
     "element_exists",
+    "harness_scenario",
     "harness_session",
     "harness_target",
     "harness_workflow",

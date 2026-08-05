@@ -13,11 +13,11 @@ from samples.test_harness.state import SYNTHETIC_DATE
 from tests.integration.windows.conftest import HarnessProcess
 from tests.integration.windows.helpers import (
     build_run_request,
+    harness_scenario,
     harness_session,
     production_services,
     record_edit_run,
     run_harness_workflow_detailed,
-    scenario_workflow,
 )
 
 
@@ -43,7 +43,7 @@ def test_full_flow_preflights_runs_and_projects_one_safe_report(
     services = production_services(harness)
     execution = services.execution_service
     assert execution is not None
-    workflow = scenario_workflow("click")
+    workflow = harness_scenario("click", harness)
     session = harness_session(harness, workflow)
 
     validation = services.validation_service.validate_static(session.workflow)
@@ -69,7 +69,7 @@ def test_validation_only_run_performs_no_action(harness: HarnessProcess) -> None
     services = production_services(harness)
     execution = services.execution_service
     assert execution is not None
-    workflow = scenario_workflow("click")
+    workflow = harness_scenario("click", harness)
 
     from universal_rpa.application.run_control import RunControl
 

@@ -154,6 +154,25 @@ class HarnessProcess:
         return int(self._identity["top_level_hwnd"])  # type: ignore[arg-type]
 
     @property
+    def window_class(self) -> str:
+        """The live Win32 class of the harness window.
+
+        Read from the running window rather than hard-coded: a Qt window class
+        embeds the Qt version (``Qt6112QWindowIcon``), so any constant would be
+        wrong the first time PySide6 is upgraded, and the environment guard
+        compares the class exactly.
+        """
+
+        import win32gui  # type: ignore[import-untyped]
+
+        cached = self._identity.get("window_class")
+        if isinstance(cached, str) and cached:
+            return cached
+        observed = str(win32gui.GetClassName(self.top_level_hwnd))
+        self._identity["window_class"] = observed
+        return observed
+
+    @property
     def state_file(self) -> Path:
         return self._state_file
 
