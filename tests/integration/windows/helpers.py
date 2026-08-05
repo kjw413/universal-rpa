@@ -33,6 +33,8 @@ from samples.test_harness.main_window import (
 from samples.test_harness.state import (
     SYNTHETIC_DATE,
     SYNTHETIC_KOREAN,
+    SYNTHETIC_TABLE_HEADERS,
+    SYNTHETIC_TABLE_ROWS,
 )
 from tests.integration.windows.conftest import HarnessProcess
 from universal_rpa.application.execution import RunStarted
@@ -44,6 +46,7 @@ from universal_rpa.bootstrap import AppServices, build_services
 from universal_rpa.domain.conditions import (
     AssertionSpec,
     ConditionSpec,
+    TableAssertionSpec,
     WaitSpec,
 )
 from universal_rpa.domain.execution import RunInputs, RunRequest
@@ -512,7 +515,15 @@ def _scenario_clipboard_table(
             step_id=extract_id,
             label="표 추출",
             action_type="clipboard.extract_table",
-            assertions=(AssertionSpec(assertion_type="clipboard.row_count_at_least", expected=3),),
+            # The clipboard adapter's only assertion is clipboard.table, carried
+            # by TableAssertionSpec. The harness publishes exactly these three
+            # synthetic rows, so this checks the paste arrived whole.
+            assertions=(
+                TableAssertionSpec(
+                    required_headers=frozenset(SYNTHETIC_TABLE_HEADERS),
+                    min_rows=len(SYNTHETIC_TABLE_ROWS),
+                ),
+            ),
         ),
         ActionStep(
             step_id=uuid4(),
