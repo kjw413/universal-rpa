@@ -30,7 +30,7 @@ from universal_rpa.application.variable_preparation import (
     VariablePreparationService,
 )
 from universal_rpa.domain.conditions import ConditionSpec, WaitSpec
-from universal_rpa.domain.errors import ErrorCode, RpaError, ValidationReport
+from universal_rpa.domain.errors import ErrorCode, RpaError, ValidationIssue, ValidationReport
 from universal_rpa.domain.execution import RunRequest
 from universal_rpa.domain.results import (
     ActionResult,
@@ -1009,11 +1009,16 @@ class ExecutionService:
     def _failed_report(
         self, request: RunRequest, run_id: UUID, started: datetime, error: RpaError | object
     ) -> RunReport:
-        safe = (
-            error
-            if isinstance(error, RpaError)
-            else RpaError(ErrorCode.INTERNAL_ERROR, "실행을 시작할 수 없습니다.")
-        )
+        # A preflight rejection arrives as a ValidationIssue, and its code and
+        # message are the only thing telling an operator what to change.
+        # Collapsing it into a generic internal error sends them looking for a
+        # product fault over a workflow they could fix themselves.
+        if isinstance(error, RpaError):
+            safe = error
+        elif isinstance(error, ValidationIssue):
+            safe = RpaError(error.code, error.safe_message)
+        else:
+            safe = RpaError(ErrorCode.INTERNAL_ERROR, "실행을 시작할 수 없습니다.")
         return RunReport(
             run_id=run_id,
             workflow_id=request.workflow.workflow_id,
