@@ -49,3 +49,22 @@ def test_unexpected_dpi_failure_is_reported() -> None:
     api = FakeDpiApi(succeeds=False, error=87, awareness=0)
     with pytest.raises(OSError):
         enable_per_monitor_v2_dpi_awareness(api)
+
+
+def test_a_second_attempt_accepts_an_already_aware_process() -> None:
+    """Exercises the real ctypes boundary the FakeDpiApi tests cannot reach.
+
+    Once the process is per-monitor aware -- because this call just made it
+    so, or because Qt or a packaged app's manifest did --
+    SetProcessDpiAwarenessContext fails with ERROR_ACCESS_DENIED, and the
+    fallback has to recognise that. It can only do so if the error is
+    actually readable, which needs a handle opened with use_last_error.
+    """
+
+    try:
+        enable_per_monitor_v2_dpi_awareness()
+    except OSError as error:  # pragma: no cover - environment without DPI APIs
+        pytest.skip(f"process DPI awareness cannot be established here: {error}")
+    _reset_dpi_awareness_for_test()
+
+    enable_per_monitor_v2_dpi_awareness()

@@ -17,18 +17,28 @@ class DpiApi(Protocol):
 
 
 class _CtypesDpiApi:
+    def __init__(self) -> None:
+        # ``ctypes.get_last_error`` reports nothing unless the library was
+        # loaded with ``use_last_error=True``, and the shared ``ctypes.windll``
+        # handle is not. Reading the error through that handle always returned
+        # 0, so ERROR_ACCESS_DENIED never surfaced and the "already
+        # per-monitor aware" path below could not be taken -- which is exactly
+        # the case in a packaged app whose manifest set awareness first.
+        self._user32 = ctypes.WinDLL("user32", use_last_error=True)
+
     def set_process_dpi_awareness_context(self, context: int) -> bool:
-        user32 = ctypes.windll.user32
-        return bool(user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(context)))
+        return bool(self._user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(context)))
 
     def get_last_error(self) -> int:
         return int(ctypes.get_last_error())
 
     def get_process_dpi_awareness(self) -> int:
         awareness = ctypes.c_int()
-        shcore = ctypes.windll.shcore
-        handle = ctypes.windll.kernel32.GetCurrentProcess()
-        result = int(shcore.GetProcessDpiAwareness(handle, ctypes.byref(awareness)))
+        # NULL asks about the current process, which is what the documentation
+        # prescribes. The GetCurrentProcess pseudo-handle cannot be used here:
+        # ctypes converts its return through a 32-bit int, so on 64-bit Windows
+        # the truncated value came back as E_INVALIDARG.
+        result = int(ctypes.windll.shcore.GetProcessDpiAwareness(None, ctypes.byref(awareness)))
         if result != 0:
             raise OSError(result, "unable to query process DPI awareness")
         return int(awareness.value)
