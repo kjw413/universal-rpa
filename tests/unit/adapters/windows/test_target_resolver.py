@@ -11,7 +11,7 @@ from universal_rpa.adapters.windows.target_resolver import (
 )
 from universal_rpa.adapters.windows.window_catalog import ClientGeometry
 from universal_rpa.domain.errors import ErrorCode, RpaError
-from universal_rpa.domain.targets import RuntimeEnvironment, TargetSpec
+from universal_rpa.domain.targets import RuntimeEnvironment, TargetSpec, UiaSelector
 
 
 class _Probe:
@@ -124,3 +124,98 @@ def test_matching_coordinate_target_uses_relative_client_arithmetic() -> None:
     assert isinstance(resolved, ResolvedCoordinateTarget)
     assert resolved.client_point == (640, 360)
     assert resolved.screen_point == (650, 380)
+
+
+# --------------------------------------------------------------------------- #
+# The real pywinauto query surface
+# --------------------------------------------------------------------------- #
+
+
+class _FakeElementInfo:
+    def __init__(self, automation_id: str | None) -> None:
+        self.automation_id = automation_id
+
+
+class _FakeElement:
+    def __init__(self, automation_id: str | None) -> None:
+        self.element_info = _FakeElementInfo(automation_id)
+
+
+class _FakeWindow:
+    """Rejects keywords the real ``IUIA.build_condition`` does not accept."""
+
+    SUPPORTED = frozenset({"process", "class_name", "title", "control_type", "content_only"})
+
+    def __init__(self, elements: tuple[_FakeElement, ...]) -> None:
+        self.elements = elements
+        self.calls: list[dict[str, object]] = []
+
+    def descendants(self, **criteria: object) -> tuple[_FakeElement, ...]:
+        unexpected = set(criteria) - self.SUPPORTED
+        if unexpected:
+            raise TypeError(
+                f"IUIA.build_condition() got an unexpected keyword argument "
+                f"{sorted(unexpected)[0]!r}"
+            )
+        self.calls.append(dict(criteria))
+        return self.elements
+
+
+def test_automation_id_is_matched_without_being_passed_to_pywinauto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AutomationId is not a pywinauto query keyword; passing it raises TypeError."""
+
+    from universal_rpa.adapters.windows import target_resolver as module
+
+    window = _FakeWindow(
+        (_FakeElement("clickButton"), _FakeElement("otherButton"), _FakeElement(None))
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pywinauto",
+        type(
+            "_M",
+            (),
+            {
+                "Desktop": lambda backend: type(
+                    "_D", (), {"window": staticmethod(lambda handle: window)}
+                )()
+            },
+        ),
+    )
+
+    found = tuple(
+        module.PywinautoUiaSearch().find(
+            42, UiaSelector(automation_id="clickButton", control_type="Button")
+        )
+    )
+
+    assert window.calls == [{"control_type": "Button"}]
+    assert len(found) == 1
+    assert found[0].element_info.automation_id == "clickButton"  # type: ignore[attr-defined]
+
+
+def test_a_selector_without_automation_id_returns_every_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from universal_rpa.adapters.windows import target_resolver as module
+
+    window = _FakeWindow((_FakeElement("a"), _FakeElement("b")))
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pywinauto",
+        type(
+            "_M",
+            (),
+            {
+                "Desktop": lambda backend: type(
+                    "_D", (), {"window": staticmethod(lambda handle: window)}
+                )()
+            },
+        ),
+    )
+
+    found = tuple(module.PywinautoUiaSearch().find(42, UiaSelector(control_type="Button")))
+
+    assert len(found) == 2

@@ -19,13 +19,29 @@ class UiaSearchPort(Protocol):
     def find(self, hwnd: int, selector: UiaSelector) -> Iterable[object]: ...
 
 
+def _element_automation_id(element: object) -> str | None:
+    """Read an element's UIA AutomationId, or ``None`` when it exposes none."""
+
+    info = getattr(element, "element_info", None)
+    value = getattr(info, "automation_id", None)
+    return value if isinstance(value, str) and value else None
+
+
 class PywinautoUiaSearch:
+    """Descendant search that filters on AutomationId itself.
+
+    pywinauto's ``descendants()`` builds a UIA condition from only ``process``,
+    ``class_name``, ``title``, ``control_type``, and ``content_only`` -- there is
+    no AutomationId among them, and passing one raises ``TypeError``.  Since
+    AutomationId is the most stable identifier a recording can capture, the query
+    runs on the properties pywinauto does support and the AutomationId match is
+    applied here, over the returned elements.
+    """
+
     def find(self, hwnd: int, selector: UiaSelector) -> Iterable[object]:
         from pywinauto import Desktop  # type: ignore[import-untyped]
 
         criteria: dict[str, str] = {}
-        if selector.automation_id:
-            criteria["auto_id"] = selector.automation_id
         if selector.control_type:
             criteria["control_type"] = selector.control_type
         if selector.name:
@@ -33,7 +49,14 @@ class PywinautoUiaSearch:
         if selector.class_name:
             criteria["class_name"] = selector.class_name
         window = Desktop(backend="uia").window(handle=hwnd)
-        return tuple(window.descendants(**criteria))
+        found = tuple(window.descendants(**criteria))
+        if selector.automation_id is None:
+            return found
+        return tuple(
+            element
+            for element in found
+            if _element_automation_id(element) == selector.automation_id
+        )
 
 
 @dataclass(frozen=True, slots=True)

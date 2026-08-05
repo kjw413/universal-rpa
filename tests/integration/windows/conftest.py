@@ -61,6 +61,7 @@ class HarnessProcess:
         self._ready_file = root / "harness-ready.json"
         self._process: subprocess.Popen[bytes] | None = None
         self._identity: dict[str, object] = {}
+        self._automation_ids: dict[str, str] | None = None
 
     # -- lifecycle --------------------------------------------------------
     def launch(self) -> None:
@@ -153,6 +154,74 @@ class HarnessProcess:
     def top_level_hwnd(self) -> int:
         return int(self._identity["top_level_hwnd"])  # type: ignore[arg-type]
 
+    def foreground(self, timeout: float = 5.0) -> bool:
+        """Bring the harness window to the front and wait until it is there.
+
+        The product's environment guard compares the *foreground* window against
+        the workflow's target app and refuses to run when they differ.  That is
+        the behaviour under test, not something to work around, so the harness
+        has to be genuinely activated first -- exactly as an operator would click
+        the target application before pressing Run.
+        """
+
+        import ctypes
+
+        import win32con  # type: ignore[import-untyped]
+        import win32gui  # type: ignore[import-untyped]
+        import win32process  # type: ignore[import-untyped]
+
+        hwnd = self.top_level_hwnd
+        user32 = ctypes.windll.user32
+        current_thread = int(ctypes.windll.kernel32.GetCurrentThreadId())
+        target_thread, _ = win32process.GetWindowThreadProcessId(hwnd)
+
+        # Ask once, then wait. Repeatedly re-asking is counterproductive: Windows'
+        # foreground lock treats a burst of activation calls as the thing it is
+        # designed to suppress, and the window ends up flashing in the taskbar
+        # instead of activating.
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        # SetForegroundWindow is refused for a process that does not own the
+        # current foreground. Attaching the input queues lifts that restriction.
+        attached = bool(user32.AttachThreadInput(current_thread, target_thread, True))
+        try:
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(current_thread, target_thread, False)
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if int(user32.GetForegroundWindow()) == hwnd:
+                return True
+            time.sleep(0.05)
+        return False
+
+    @property
+    def automation_ids(self) -> dict[str, str]:
+        """Map each control's Qt ``objectName`` to its published AutomationId.
+
+        Qt does not publish the bare ``objectName``: it publishes a dotted path
+        such as ``QApplication.harnessMainWindow.QWidget.clickButton``.  The
+        resolver matches AutomationId exactly -- which is correct, since that is
+        what a recording captures -- so the tests have to address controls by the
+        identity UIA actually reports rather than the name the harness set.
+        """
+
+        cached = self._automation_ids
+        if cached is not None:
+            return dict(cached)
+        from pywinauto import Desktop  # type: ignore[import-untyped]
+
+        window = Desktop(backend="uia").window(handle=self.top_level_hwnd)
+        discovered: dict[str, str] = {}
+        for element in window.descendants():
+            published = getattr(element.element_info, "automation_id", None)
+            if isinstance(published, str) and published:
+                discovered[published.rpartition(".")[2]] = published
+        self._automation_ids = discovered
+        return dict(discovered)
+
     @property
     def window_class(self) -> str:
         """The live Win32 class of the harness window.
@@ -195,6 +264,7 @@ class HarnessProcess:
 
         self.terminate()
         self._ready_file.unlink(missing_ok=True)
+        self._automation_ids = None
         object.__setattr__(self, "_options", HarnessOptions(**options))  # type: ignore[arg-type]
         self.launch()
 
@@ -248,6 +318,7 @@ def harness(tmp_path: Path, harness_options: HarnessOptions) -> Iterator[Harness
     require_interactive_desktop()
     process = HarnessProcess(tmp_path, harness_options)
     process.launch()
+    process.foreground()
     try:
         yield process
     finally:

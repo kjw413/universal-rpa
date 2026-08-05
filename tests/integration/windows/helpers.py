@@ -9,7 +9,8 @@ green run here is evidence about the shipped code rather than about the tests.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -23,13 +24,15 @@ from samples.test_harness.main_window import (
     DRAG_SURFACE_ID,
     DUPLICATE_BUTTON_ID,
     KOREAN_TEXT_ID,
-    MODAL_CLOSE_BUTTON_ID,
     NORMAL_TEXT_ID,
     OPEN_MODAL_BUTTON_ID,
     PASSWORD_TEXT_ID,
     SCROLL_SURFACE_ID,
 )
-from samples.test_harness.state import SYNTHETIC_DATE, SYNTHETIC_KOREAN
+from samples.test_harness.state import (
+    SYNTHETIC_DATE,
+    SYNTHETIC_KOREAN,
+)
 from tests.integration.windows.conftest import HarnessProcess
 from universal_rpa.application.execution import RunStarted
 from universal_rpa.application.normalization import NormalizationResult
@@ -37,7 +40,11 @@ from universal_rpa.application.projects import ProjectSession
 from universal_rpa.application.reports import SafeRunReportDocument
 from universal_rpa.application.run_control import RunControl
 from universal_rpa.bootstrap import AppServices, build_services
-from universal_rpa.domain.conditions import AssertionSpec, ConditionSpec, WaitSpec
+from universal_rpa.domain.conditions import (
+    AssertionSpec,
+    ConditionSpec,
+    WaitSpec,
+)
 from universal_rpa.domain.execution import RunInputs, RunRequest
 from universal_rpa.domain.recording import RecordingTarget
 from universal_rpa.domain.results import RunReport
@@ -60,6 +67,74 @@ HARNESS_WINDOW_TITLE = "Universal RPA Test Harness"
 NOW = datetime(2026, 7, 27, tzinfo=UTC)
 
 
+@dataclass(frozen=True, slots=True)
+class HarnessIdentity:
+    """What a scenario needs to address the *running* harness window.
+
+    Both parts have to come from the live window rather than from constants.
+    A Qt window class embeds the Qt version, and Qt publishes AutomationId as
+    a dotted path (``QApplication.harnessMainWindow.QWidget.clickButton``)
+    rather than the bare ``objectName`` the harness set.
+    """
+
+    window_class: str
+    automation_ids: Mapping[str, str] = field(default_factory=dict)
+
+    def automation_id(self, object_name: str) -> str:
+        """The published AutomationId for one control.
+
+        A control that is hidden when the tree is read -- ``delayedControl`` is
+        the whole point of one scenario -- has no published id yet.  Qt derives
+        the id from the widget's ancestry, not its visibility, so the prefix its
+        siblings carry is the prefix it will carry once shown.  Deriving it keeps
+        the target an exact AutomationId match, which is what production does.
+        """
+
+        known = self.automation_ids.get(object_name)
+        if known is not None:
+            return known
+        prefix = self.dominant_prefix()
+        return f"{prefix}{object_name}" if prefix else object_name
+
+    def dominant_prefix(self) -> str:
+        """The most common ``a.b.c.`` prefix among the published ids."""
+
+        counts: dict[str, int] = {}
+        for published in self.automation_ids.values():
+            head, separator, _ = published.rpartition(".")
+            if separator:
+                key = f"{head}."
+                counts[key] = counts.get(key, 0) + 1
+        if not counts:
+            return ""
+        return max(sorted(counts), key=lambda key: counts[key])
+
+    def target_by_name(self, name: str, *, control_type: str) -> TargetSpec:
+        """Address a control that does not exist until an earlier step runs.
+
+        A modal's contents have no AutomationId to read ahead of time, so match
+        on the accessible name and control type instead -- both are first-class
+        UIA properties and both are exactly what a recording would capture when
+        no AutomationId is available.
+        """
+
+        return TargetSpec.model_validate(
+            {
+                "adapter_id": "windows",
+                "payload": {
+                    "selector": {"name": name, "control_type": control_type},
+                    "coordinate_fallback": None,
+                },
+            }
+        )
+
+    def target(self, object_name: str, *, control_type: str | None = None) -> TargetSpec:
+        return harness_target(self.automation_id(object_name), control_type=control_type)
+
+    def password_target(self) -> TargetSpec:
+        return password_target(self.automation_id(PASSWORD_TEXT_ID))
+
+
 def harness_target(automation_id: str, *, control_type: str | None = None) -> TargetSpec:
     """A selector-only Windows target; the harness never needs a coordinate."""
 
@@ -74,14 +149,14 @@ def harness_target(automation_id: str, *, control_type: str | None = None) -> Ta
     )
 
 
-def password_target() -> TargetSpec:
+def password_target(automation_id: str = PASSWORD_TEXT_ID) -> TargetSpec:
     """The password field, with its mandatory mask that no edit can remove."""
 
     return TargetSpec.model_validate(
         {
             "adapter_id": "windows",
             "payload": {
-                "selector": {"automation_id": PASSWORD_TEXT_ID},
+                "selector": {"automation_id": automation_id},
                 "coordinate_fallback": None,
                 "mandatory_sensitive_regions": [{"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0}],
             },
@@ -150,29 +225,35 @@ def harness_workflow(name: str, *steps: Step, window_class: str) -> Workflow:
 # -- scenarios -----------------------------------------------------------------
 
 
-def _scenario_click(window_class: str) -> Workflow:
-    target = harness_target(CLICK_BUTTON_ID)
+def _scenario_click(identity: HarnessIdentity) -> Workflow:
+    target = identity.target(CLICK_BUTTON_ID)
     return harness_workflow(
         "클릭",
-        action("windows.activate_window", label="창 활성화", target=target),
+        action(
+            "windows.activate_window",
+            label="창 활성화",
+            target=target,
+            postcondition=element_exists(target),
+        ),
         action(
             "windows.click",
             label="클릭",
             target=target,
             postcondition=element_exists(target),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_duplicate_selector(window_class: str) -> Workflow:
-    target = harness_target(DUPLICATE_BUTTON_ID)
+def _scenario_duplicate_selector(identity: HarnessIdentity) -> Workflow:
+    target = identity.target(DUPLICATE_BUTTON_ID)
     return harness_workflow(
         "중복 선택자",
         action(
             "windows.activate_window",
             label="창 활성화",
-            target=harness_target(CLICK_BUTTON_ID),
+            target=identity.target(CLICK_BUTTON_ID),
+            postcondition=element_exists(identity.target(CLICK_BUTTON_ID)),
         ),
         action(
             "windows.click",
@@ -180,26 +261,31 @@ def _scenario_duplicate_selector(window_class: str) -> Workflow:
             target=target,
             postcondition=element_exists(target),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_uia_after_move(window_class: str) -> Workflow:
-    target = harness_target(CLICK_BUTTON_ID)
+def _scenario_uia_after_move(identity: HarnessIdentity) -> Workflow:
+    target = identity.target(CLICK_BUTTON_ID)
     return harness_workflow(
         "이동 후 UIA",
-        action("windows.activate_window", label="창 활성화", target=target),
+        action(
+            "windows.activate_window",
+            label="창 활성화",
+            target=target,
+            postcondition=element_exists(target),
+        ),
         action(
             "windows.click",
             label="이동 후 클릭",
             target=target,
             postcondition=element_exists(target),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_coordinate_fallback(window_class: str) -> Workflow:
+def _scenario_coordinate_fallback(identity: HarnessIdentity) -> Workflow:
     """A coordinate fallback recorded at the pre-resize client size.
 
     After the harness is resized past the 2 % tolerance the guard must refuse the
@@ -213,7 +299,7 @@ def _scenario_coordinate_fallback(window_class: str) -> Workflow:
                 "selector": None,
                 "coordinate_fallback": {
                     "recorded_process_executable": HARNESS_EXECUTABLE,
-                    "recorded_window_class": window_class,
+                    "recorded_window_class": identity.window_class,
                     "point": {"x": 0.25, "y": 0.25},
                     "recorded_dpi_x": 96,
                     "recorded_dpi_y": 96,
@@ -231,12 +317,12 @@ def _scenario_coordinate_fallback(window_class: str) -> Workflow:
             target=target,
             assertions=(value_equals("unreachable"),),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_delayed_element(window_class: str) -> Workflow:
-    delayed = harness_target(DELAYED_CONTROL_ID)
+def _scenario_delayed_element(identity: HarnessIdentity) -> Workflow:
+    delayed = identity.target(DELAYED_CONTROL_ID)
     return harness_workflow(
         "지연 요소",
         action(
@@ -250,12 +336,12 @@ def _scenario_delayed_element(window_class: str) -> Workflow:
             target=delayed,
             postcondition=element_exists(delayed),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_intentional_timeout(window_class: str) -> Workflow:
-    delayed = harness_target(DELAYED_CONTROL_ID)
+def _scenario_intentional_timeout(identity: HarnessIdentity) -> Workflow:
+    delayed = identity.target(DELAYED_CONTROL_ID)
     return harness_workflow(
         "의도적 시간 초과",
         action(
@@ -263,16 +349,21 @@ def _scenario_intentional_timeout(window_class: str) -> Workflow:
             label="나타나지 않는 요소 대기",
             wait=element_exists(delayed, timeout_ms=1_000),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_modal(window_class: str) -> Workflow:
-    opener = harness_target(OPEN_MODAL_BUTTON_ID)
-    closer = harness_target(MODAL_CLOSE_BUTTON_ID)
+def _scenario_modal(identity: HarnessIdentity) -> Workflow:
+    opener = identity.target(OPEN_MODAL_BUTTON_ID)
+    closer = identity.target_by_name("확인", control_type="Button")
     return harness_workflow(
         "소유 모달",
-        action("windows.activate_window", label="창 활성화", target=opener),
+        action(
+            "windows.activate_window",
+            label="창 활성화",
+            target=opener,
+            postcondition=element_exists(opener),
+        ),
         action(
             "windows.click",
             label="모달 열기",
@@ -285,15 +376,20 @@ def _scenario_modal(window_class: str) -> Workflow:
             target=closer,
             postcondition=element_exists(opener),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_korean_verification(window_class: str) -> Workflow:
-    korean = harness_target(KOREAN_TEXT_ID)
+def _scenario_korean_verification(identity: HarnessIdentity) -> Workflow:
+    korean = identity.target(KOREAN_TEXT_ID)
     return harness_workflow(
         "한글 검증",
-        action("windows.activate_window", label="창 활성화", target=korean),
+        action(
+            "windows.activate_window",
+            label="창 활성화",
+            target=korean,
+            postcondition=element_exists(korean),
+        ),
         action(
             "windows.set_text",
             label="한글 입력",
@@ -301,44 +397,54 @@ def _scenario_korean_verification(window_class: str) -> Workflow:
             value=LiteralValue(value=SYNTHETIC_KOREAN),
             assertions=(value_equals(SYNTHETIC_KOREAN),),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_password_masking(window_class: str) -> Workflow:
-    password = password_target()
+def _scenario_password_masking(identity: HarnessIdentity) -> Workflow:
+    password = identity.password_target()
     return harness_workflow(
         "비밀번호 마스킹",
-        action("windows.activate_window", label="창 활성화", target=password),
+        action(
+            "windows.activate_window",
+            label="창 활성화",
+            target=password,
+            postcondition=element_exists(password),
+        ),
         action(
             "windows.click",
             label="존재하지 않는 확인",
-            target=harness_target("missingControl"),
-            postcondition=element_exists(harness_target("missingControl"), timeout_ms=1_000),
+            target=identity.target("missingControl"),
+            postcondition=element_exists(identity.target("missingControl"), timeout_ms=1_000),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_drag_scroll_hotkey(window_class: str) -> Workflow:
-    drag = harness_target(DRAG_SURFACE_ID)
-    scroll = harness_target(SCROLL_SURFACE_ID)
-    normal = harness_target(NORMAL_TEXT_ID)
+def _scenario_drag_scroll_hotkey(identity: HarnessIdentity) -> Workflow:
+    drag = identity.target(DRAG_SURFACE_ID)
+    scroll = identity.target(SCROLL_SURFACE_ID)
+    normal = identity.target(NORMAL_TEXT_ID)
     return harness_workflow(
         "드래그·스크롤·단축키",
-        action("windows.activate_window", label="창 활성화", target=normal),
+        action(
+            "windows.activate_window",
+            label="창 활성화",
+            target=normal,
+            postcondition=element_exists(normal),
+        ),
         action(
             "windows.drag",
             label="드래그",
             target=drag,
-            parameters={"button": "left", "end_x": 0.9, "end_y": 0.5},
+            parameters={"button": "left", "end_point": {"x": 0.9, "y": 0.5}},
             postcondition=element_exists(drag),
         ),
         action(
             "windows.scroll",
             label="스크롤",
             target=scroll,
-            parameters={"horizontal": 0, "vertical": -3},
+            parameters={"horizontal_delta": 0, "vertical_delta": -360},
             postcondition=element_exists(scroll),
         ),
         action(
@@ -348,31 +454,43 @@ def _scenario_drag_scroll_hotkey(window_class: str) -> Workflow:
             parameters={"key": "a", "modifiers": ["ctrl"]},
             postcondition=element_exists(normal),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_double_click(window_class: str) -> Workflow:
-    target = harness_target(DOUBLE_CLICK_BUTTON_ID)
+def _scenario_double_click(identity: HarnessIdentity) -> Workflow:
+    target = identity.target(DOUBLE_CLICK_BUTTON_ID)
     return harness_workflow(
         "더블클릭",
-        action("windows.activate_window", label="창 활성화", target=target),
+        action(
+            "windows.activate_window",
+            label="창 활성화",
+            target=target,
+            postcondition=element_exists(target),
+        ),
         action(
             "windows.double_click",
             label="더블클릭",
             target=target,
             postcondition=element_exists(target),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_clipboard_table(window_class: str, output: str = "harness/table.csv") -> Workflow:
-    copy_button = harness_target(COPY_TABLE_BUTTON_ID)
+def _scenario_clipboard_table(
+    identity: HarnessIdentity, output: str = "harness/table.csv"
+) -> Workflow:
+    copy_button = identity.target(COPY_TABLE_BUTTON_ID)
     extract_id = uuid4()
     return harness_workflow(
         "클립보드 표 추출",
-        action("windows.activate_window", label="창 활성화", target=copy_button),
+        action(
+            "windows.activate_window",
+            label="창 활성화",
+            target=copy_button,
+            postcondition=element_exists(copy_button),
+        ),
         action(
             "windows.click",
             label="표 복사",
@@ -390,17 +508,22 @@ def _scenario_clipboard_table(window_class: str, output: str = "harness/table.cs
             label="표 저장",
             action_type="tabular.save_table",
             input_step_id=extract_id,
-            parameters={"format": "csv", "relative_path": OutputRelativePath(output).root},
+            parameters={"format": "csv", "output_path": OutputRelativePath(output).root},
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
-def _scenario_ctrl_a_date_enter(window_class: str) -> Workflow:
-    date_field = harness_target(DATE_TEXT_ID)
+def _scenario_ctrl_a_date_enter(identity: HarnessIdentity) -> Workflow:
+    date_field = identity.target(DATE_TEXT_ID)
     return harness_workflow(
         "Ctrl+A 날짜 Enter",
-        action("windows.activate_window", label="창 활성화", target=date_field),
+        action(
+            "windows.activate_window",
+            label="창 활성화",
+            target=date_field,
+            postcondition=element_exists(date_field),
+        ),
         action(
             "windows.hotkey",
             label="전체 선택",
@@ -419,10 +542,10 @@ def _scenario_ctrl_a_date_enter(window_class: str) -> Workflow:
             "windows.press_key",
             label="Enter",
             target=date_field,
-            parameters={"key": "enter", "modifiers": []},
+            parameters={"key": "enter"},
             postcondition=element_exists(date_field),
         ),
-        window_class=window_class,
+        window_class=identity.window_class,
     )
 
 
@@ -443,20 +566,29 @@ SCENARIOS: dict[str, object] = {
 }
 
 
-def scenario_workflow(name: str, window_class: str = FALLBACK_WINDOW_CLASS) -> Workflow:
-    """Build one named scenario against a specific live window class."""
+def scenario_workflow(name: str, identity: HarnessIdentity | None = None) -> Workflow:
+    """Build one named scenario against a given window identity."""
 
     try:
         builder = SCENARIOS[name]
     except KeyError:
         raise KeyError(f"unknown harness scenario: {name}") from None
-    return builder(window_class)  # type: ignore[operator]
+    return builder(identity or HarnessIdentity(FALLBACK_WINDOW_CLASS))  # type: ignore[operator]
+
+
+def harness_identity(harness: HarnessProcess) -> HarnessIdentity:
+    """Read the window class and published AutomationIds from the live window."""
+
+    return HarnessIdentity(
+        window_class=harness.window_class,
+        automation_ids=harness.automation_ids,
+    )
 
 
 def harness_scenario(name: str, harness: HarnessProcess) -> Workflow:
-    """Build a scenario bound to the class of the *running* harness window."""
+    """Build a scenario bound to the *running* harness window."""
 
-    return scenario_workflow(name, harness.window_class)
+    return scenario_workflow(name, harness_identity(harness))
 
 
 # -- production wiring ---------------------------------------------------------
@@ -527,6 +659,14 @@ def run_harness_workflow_detailed(
     execution = resolved.execution_service
     if execution is None:
         raise RuntimeError("production execution service is unavailable")
+    # The environment guard compares the foreground window, so the harness has to
+    # be genuinely in front before the run starts. Fail loudly here: proceeding
+    # would surface as ENVIRONMENT_MISMATCH and read as a product defect.
+    if not harness.foreground():
+        raise RuntimeError(
+            "the harness window could not be brought to the foreground; "
+            "interactive E2E needs an unlocked desktop with no window blocking focus"
+        )
     workflow = harness_scenario(scenario, harness)
     request = build_run_request(harness, workflow)
     observers = (resolved.artifact_store,) if resolved.artifact_store is not None else ()
@@ -648,12 +788,14 @@ __all__ = [
     "HARNESS_EXECUTABLE",
     "HARNESS_WINDOW_TITLE",
     "SCENARIOS",
+    "HarnessIdentity",
     "HarnessRunOutcome",
     "RecordEditRunResult",
     "action",
     "build_run_request",
     "drive_scenario",
     "element_exists",
+    "harness_identity",
     "harness_scenario",
     "harness_session",
     "harness_target",
