@@ -69,9 +69,7 @@ class WindowsInputDriver:
 
         point = self._pointer_target(target)
         if point is None:
-            raise RpaError(
-                ErrorCode.ACTION_FAILED, "더블클릭할 대상의 좌표를 확인할 수 없습니다."
-            )
+            raise RpaError(ErrorCode.ACTION_FAILED, "더블클릭할 대상의 좌표를 확인할 수 없습니다.")
         try:
             import win32api  # type: ignore[import-untyped]
             import win32con  # type: ignore[import-untyped]

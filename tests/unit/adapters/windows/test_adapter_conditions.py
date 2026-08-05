@@ -109,9 +109,7 @@ def _condition(condition_type: str) -> ConditionSpec:
 
 
 def _coordinate_target() -> ResolvedCoordinateTarget:
-    return ResolvedCoordinateTarget(
-        window=IDENTITY, client_point=(10, 20), screen_point=(150, 300)
-    )
+    return ResolvedCoordinateTarget(window=IDENTITY, client_point=(10, 20), screen_point=(150, 300))
 
 
 def test_element_exists_is_satisfied_by_a_resolved_element() -> None:

@@ -200,9 +200,7 @@ def test_a_password_fields_value_is_never_read_into_the_snapshot() -> None:
     secret, _ = _resolve_one_keystroke(
         _FakeElement(runtime_id=_RUNTIME_ID, is_password=True, value="hunter2")
     )
-    ordinary, _ = _resolve_one_keystroke(
-        _FakeElement(runtime_id=_RUNTIME_ID, value="hunter2")
-    )
+    ordinary, _ = _resolve_one_keystroke(_FakeElement(runtime_id=_RUNTIME_ID, value="hunter2"))
 
     # The ordinary field proves the value really is readable here, so the
     # password field's None is the masking working rather than a fake that
