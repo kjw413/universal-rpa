@@ -322,11 +322,17 @@ class WindowsAutomationAdapter:
                 return ConditionObservation(False, None, FrozenMapping.empty())
             raise
         element = cast(Any, resolved.element) if isinstance(resolved, ResolvedUiaTarget) else None
-        if (
-            condition.condition_type == "windows.element_exists"
-            or condition.condition_type == "windows.window_exists"
-        ):
+        if condition.condition_type == "windows.window_exists":
+            # Resolution established the window identity it guarded against, so
+            # the window is genuinely there however the target resolved.
             return ConditionObservation(True, True, FrozenMapping.empty())
+        if condition.condition_type == "windows.element_exists":
+            # A coordinate fallback derives a point from the recorded ratio
+            # without looking at what -- if anything -- is there, so it is no
+            # evidence that the named element exists. Claiming otherwise turns
+            # a postcondition into a check that cannot fail.
+            found = element is not None
+            return ConditionObservation(found, found, FrozenMapping.empty())
         if element is None:
             return ConditionObservation(False, None, FrozenMapping.empty())
         if condition.condition_type == "windows.element_visible":
