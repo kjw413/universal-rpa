@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from samples.test_harness.main_window import (
@@ -708,15 +709,17 @@ def record_edit_run(
 ) -> RecordEditRunResult:
     """Record real input, normalize it, import it, and run the imported workflow.
 
-    The synthesized input is produced by the production Windows adapter so the
-    recorder observes exactly the native events a human would generate.
+    The synthesized input is real native input, so the recorder observes what a
+    person's hands would produce.  Most scenarios get that for free by replaying
+    the workflow through the production adapter; the ones in ``RECORDING_INPUT``
+    cannot, because the adapter reaches the same end state without any input.
     """
 
     resolved = services or production_services(harness)
     recorder = resolved.recording_service
     session = recorder.start(recording_target(harness))
     try:
-        drive_scenario(scenario, harness, resolved)
+        drive_recording_input(scenario, harness, resolved)
         time.sleep(settle_seconds)
     finally:
         recorder.stop(keep=False, timeout_seconds=10.0)
@@ -742,6 +745,73 @@ def drive_scenario(scenario: str, harness: HarnessProcess, services: AppServices
     workflow = harness_scenario(scenario, harness)
     request = build_run_request(harness, workflow)
     execution.run(request, RunControl())
+
+
+#: One focus-poller cycle is 30 ms, and every keystroke costs the recorder a
+#: UIA round trip on a single worker thread.  Input delivered faster than that
+#: resolves against a not-yet-published focus or exceeds the resolver's budget,
+#: and the event is masked -- which would split one text entry into two
+#: candidates.  A person types with gaps anyway, so pacing the synthetic input
+#: makes it both more faithful and stable.
+_FOCUS_PUBLISH_SETTLE_SECONDS = 0.2
+_KEYSTROKE_GAP_SECONDS = 0.05
+
+
+def _harness_edit(harness: HarnessProcess, object_name: str) -> Any:
+    from pywinauto import Desktop  # type: ignore[import-untyped]
+
+    automation_id = harness_identity(harness).automation_id(object_name)
+    window = Desktop(backend="uia").window(handle=harness.top_level_hwnd)
+    return window.child_window(auto_id=automation_id, control_type="Edit").wrapper_object()
+
+
+def _record_ctrl_a_date_enter(harness: HarnessProcess, services: AppServices) -> None:
+    """Produce the keystrokes an operator makes when correcting a date.
+
+    Focus is placed programmatically instead of by clicking: a click would be
+    recorded as a mouse candidate of its own, and putting the caret in the
+    field is setup rather than the behaviour under test.  Every input after
+    that is real native input the recorder observes through its hooks.
+    """
+
+    del services
+    from pywinauto import keyboard
+
+    _harness_edit(harness, DATE_TEXT_ID).set_focus()
+    time.sleep(_FOCUS_PUBLISH_SETTLE_SECONDS)
+
+    keyboard.send_keys("^a", pause=0)
+    time.sleep(_KEYSTROKE_GAP_SECONDS)
+    for character in SYNTHETIC_DATE:
+        keyboard.send_keys(character, pause=0)
+        time.sleep(_KEYSTROKE_GAP_SECONDS)
+    keyboard.send_keys("{ENTER}", pause=0)
+
+
+#: Scenarios whose *recording* input cannot come from replaying the workflow.
+#:
+#: ``windows.set_text`` deliberately injects text through the UIA value
+#: pattern, which is the right choice for automation but produces no keystrokes
+#: at all.  Replaying it therefore shows the recorder nothing, so a scenario
+#: that exists to prove text entry is recorded has to generate the input a
+#: person generates.
+RECORDING_INPUT: dict[str, object] = {
+    "ctrl-a-date-enter": _record_ctrl_a_date_enter,
+}
+
+
+def drive_recording_input(
+    scenario: str,
+    harness: HarnessProcess,
+    services: AppServices,
+) -> None:
+    """Generate the input the recorder should observe for one scenario."""
+
+    human_input = RECORDING_INPUT.get(scenario)
+    if human_input is None:
+        drive_scenario(scenario, harness, services)
+        return
+    human_input(harness, services)  # type: ignore[operator]
 
 
 def started_event(report: RunReport, workflow: Workflow) -> RunStarted:
@@ -787,12 +857,14 @@ __all__ = [
     "FALLBACK_WINDOW_CLASS",
     "HARNESS_EXECUTABLE",
     "HARNESS_WINDOW_TITLE",
+    "RECORDING_INPUT",
     "SCENARIOS",
     "HarnessIdentity",
     "HarnessRunOutcome",
     "RecordEditRunResult",
     "action",
     "build_run_request",
+    "drive_recording_input",
     "drive_scenario",
     "element_exists",
     "harness_identity",
