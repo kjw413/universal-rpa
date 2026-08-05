@@ -61,8 +61,13 @@ def test_reparse_point_run_directories_are_reported_and_never_followed(tmp_path:
         link.symlink_to(outside, target_is_directory=True)
     except (OSError, NotImplementedError) as error:
         pytest.skip(f"directory symlink privilege unavailable: {error}")
+    # Age the *target*, not the link. Windows has no os.utime that can touch a
+    # link without following it, and the link's own age would prove nothing:
+    # pruning reports a reparse point before it ever reads a timestamp. An
+    # expired target is what makes the assertions below bite -- a service that
+    # followed the link would find an expired directory and delete keep.txt.
     stamp = (NOW - timedelta(days=99)).timestamp()
-    os.utime(link, (stamp, stamp), follow_symlinks=False)
+    os.utime(outside, (stamp, stamp))
 
     summary = ArtifactRetentionService(tmp_path / "runs").prune(NOW, timedelta(days=30))
 
