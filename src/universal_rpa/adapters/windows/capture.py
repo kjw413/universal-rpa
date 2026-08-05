@@ -81,6 +81,12 @@ MODIFIER_ALIASES = {
 def normalize_key(key: object) -> tuple[str, str | None]:
     char = getattr(key, "char", None)
     if isinstance(char, str) and char:
+        if len(char) == 1 and 1 <= ord(char) <= 26:
+            # Windows renders a letter held with Ctrl as its ASCII control
+            # code (Ctrl+A == chr(1) ... Ctrl+Z == chr(26)) rather than the
+            # letter itself -- recover the intended key instead of recording
+            # the control byte as what was pressed.
+            return chr(ord(char) + 96), None
         return char.casefold(), char
     name = getattr(key, "name", None)
     if isinstance(name, str) and name:

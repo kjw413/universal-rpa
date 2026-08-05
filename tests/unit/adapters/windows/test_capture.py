@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
-from universal_rpa.adapters.windows.capture import PynputInputCapture
+from universal_rpa.adapters.windows.capture import PynputInputCapture, normalize_key
 from universal_rpa.adapters.windows.context import UiaFocusCache
 from universal_rpa.domain.recording import EventFocusSnapshot, RawEventType
 from universal_rpa.ports.capture import ControlCommand
@@ -120,6 +120,32 @@ def test_enter_is_kept_as_fixed_command_token_without_text() -> None:
     assert event.event_type is RawEventType.KEY_DOWN
     assert event.key_token is not None
     assert event.key_token.reveal_once() == ("enter", None)
+
+
+def test_normalize_key_recovers_ctrl_held_letters_from_their_control_code() -> None:
+    """Windows renders a letter held with Ctrl as its ASCII control code
+    (Ctrl+A == chr(1) ... Ctrl+Z == chr(26)) rather than the letter itself --
+    normalize_key must recover the letter, not report the control byte."""
+    assert normalize_key(FakeKey(char="\x01")) == ("a", None)
+    assert normalize_key(FakeKey(char="\x1a")) == ("z", None)
+
+
+def test_normalize_key_keeps_a_plain_character_key_as_typed() -> None:
+    assert normalize_key(FakeKey(char="a")) == ("a", "a")
+
+
+def test_ctrl_a_chord_is_captured_as_the_letter_not_the_control_code() -> None:
+    event_sink = Mock()
+    capture = make_capture()
+    capture.start(event_sink, Mock())
+    capture._on_press(FakeKey(name="ctrl_l"))
+    event_sink.reset_mock()
+
+    capture._on_press(FakeKey(char="\x01"))
+
+    event = event_sink.call_args.args[0]
+    assert event.key_token is not None
+    assert event.key_token.reveal_once() == ("a", None)
 
 
 def test_mouse_move_is_emitted_only_while_drag_button_is_pressed() -> None:
