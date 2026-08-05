@@ -4,7 +4,7 @@ import ctypes
 import os
 import threading
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,6 +25,7 @@ from universal_rpa.adapters.windows.screen_capture import (
     Win32ExactWindowCapture,
 )
 from universal_rpa.adapters.windows.target_resolver import WindowsTargetResolver
+from universal_rpa.adapters.windows.uia_facade import PywinautoUiaFacade
 from universal_rpa.adapters.windows.window_catalog import PyWin32WindowFacade, Win32WindowCatalog
 from universal_rpa.application.editing import WorkflowEditingService
 from universal_rpa.application.execution import ExecutionService
@@ -73,20 +74,6 @@ class ArtifactRetentionPort(Protocol):
         now: datetime,
         retention: timedelta = DEFAULT_ARTIFACT_RETENTION,
     ) -> ArtifactRetentionSummary: ...
-
-
-class _CoordinateOnlyUia:
-    def element_from_runtime_id(self, runtime_id: tuple[int, ...]) -> object | None:
-        del runtime_id
-        return None
-
-    def elements_from_point(self, screen_x: int, screen_y: int) -> Iterable[object]:
-        del screen_x, screen_y
-        return ()
-
-    def password_elements(self, top_level_hwnd: int) -> Iterable[object]:
-        del top_level_hwnd
-        return ()
 
 
 class _FocusPollingCapture:
@@ -197,9 +184,10 @@ def _production_recording_boundaries() -> tuple[InputCapturePort, WindowContextP
     )
     cache = UiaFocusCache(initial)
     catalog = Win32WindowCatalog(win32)
+    facade = PywinautoUiaFacade()
     context = WindowsWindowContext(
         win32=win32,
-        uia=_CoordinateOnlyUia(),
+        uia=facade,
         focus_cache=cache,
         catalog=catalog,
     )
@@ -207,6 +195,7 @@ def _production_recording_boundaries() -> tuple[InputCapturePort, WindowContextP
         PynputInputCapture(context_cache=cache),
         cache,
         win32,
+        focused_runtime_id=facade.focused_runtime_id,
     )
     return capture, context
 

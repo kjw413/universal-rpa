@@ -12,6 +12,8 @@ from tests.helpers.recording_fakes import (
 )
 from universal_rpa.adapters.registry import AdapterRegistry
 from universal_rpa.adapters.tabular.adapter import TabularAutomationAdapter
+from universal_rpa.adapters.windows.context import WindowsWindowContext
+from universal_rpa.adapters.windows.uia_facade import PywinautoUiaFacade
 from universal_rpa.bootstrap import build_services
 from universal_rpa.domain.errors import ErrorCode
 
@@ -37,6 +39,22 @@ def test_bootstrap_registers_exactly_windows_clipboard_and_tabular(tmp_path: Pat
 
     assert set(services.adapter_registry.adapter_ids()) == {"windows", "clipboard", "tabular"}
     assert services.execution_service is not None
+
+
+def test_production_bootstrap_wires_a_real_uia_facade(tmp_path: Path) -> None:
+    """A stub UiaFacade always resolves to nothing, so the recorder would
+    silently produce zero step candidates -- pin the wiring so that defect
+    (the M6 plan's root cause) cannot regress unnoticed."""
+    services = build_services(
+        local_app_data=tmp_path / "appdata",
+        recording_store=InMemoryRecordingStore(),
+        source_repository_root=tmp_path / "source",
+        now=NOW,
+    )
+
+    window_context = services.window_context
+    assert isinstance(window_context, WindowsWindowContext)
+    assert isinstance(window_context._uia, PywinautoUiaFacade)
 
 
 def test_supplied_registry_is_used_verbatim_without_production_adapters(
