@@ -30,6 +30,11 @@ SHUTDOWN_TIMEOUT_SECONDS = 10.0
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
+#: SystemParametersInfo constants for the foreground activation lock.
+SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000
+SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001
+SPIF_SENDCHANGE = 0x0002
+
 
 def require_interactive_desktop() -> None:
     """Skip unless an operator explicitly opted this session in."""
@@ -175,27 +180,44 @@ class HarnessProcess:
         current_thread = int(ctypes.windll.kernel32.GetCurrentThreadId())
         target_thread, _ = win32process.GetWindowThreadProcessId(hwnd)
 
-        # Ask once, then wait. Repeatedly re-asking is counterproductive: Windows'
-        # foreground lock treats a burst of activation calls as the thing it is
-        # designed to suppress, and the window ends up flashing in the taskbar
-        # instead of activating.
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        # SetForegroundWindow is refused for a process that does not own the
-        # current foreground. Attaching the input queues lifts that restriction.
-        attached = bool(user32.AttachThreadInput(current_thread, target_thread, True))
-        try:
-            user32.BringWindowToTop(hwnd)
-            user32.SetForegroundWindow(hwnd)
-        finally:
-            if attached:
-                user32.AttachThreadInput(current_thread, target_thread, False)
+        if int(user32.GetForegroundWindow()) == hwnd:
+            return True
 
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if int(user32.GetForegroundWindow()) == hwnd:
-                return True
-            time.sleep(0.05)
-        return False
+        # Windows refuses SetForegroundWindow while its foreground lock timeout is
+        # running, which is exactly the state a test loop keeps the desktop in.
+        # Clear the timeout for the duration of the activation and put it back.
+        previous_lock = ctypes.c_uint(0)
+        user32.SystemParametersInfoW(
+            SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(previous_lock), 0
+        )
+        user32.SystemParametersInfoW(
+            SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.c_void_p(0), SPIF_SENDCHANGE
+        )
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            # Attaching the two input queues lifts the remaining restriction on a
+            # process that does not currently own the foreground.
+            attached = bool(user32.AttachThreadInput(current_thread, target_thread, True))
+            try:
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+            finally:
+                if attached:
+                    user32.AttachThreadInput(current_thread, target_thread, False)
+
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if int(user32.GetForegroundWindow()) == hwnd:
+                    return True
+                time.sleep(0.05)
+            return False
+        finally:
+            user32.SystemParametersInfoW(
+                SPI_SETFOREGROUNDLOCKTIMEOUT,
+                0,
+                ctypes.c_void_p(previous_lock.value),
+                SPIF_SENDCHANGE,
+            )
 
     @property
     def automation_ids(self) -> dict[str, str]:
