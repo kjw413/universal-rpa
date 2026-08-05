@@ -101,6 +101,21 @@ class PywinautoUiaFacade:
     def password_elements(self, top_level_hwnd: int) -> tuple[object, ...]:
         return self._call(self._resolve_password_elements, top_level_hwnd) or ()
 
+    def focused_runtime_id(self) -> tuple[int, ...] | None:
+        """The runtime id of whatever is currently focused, for the focus
+        poller to publish -- separate from ``element_from_runtime_id``, which
+        resolves a previously-published id back to an element."""
+        return cast("tuple[int, ...] | None", self._call(self._resolve_focused_runtime_id))
+
+    def _resolve_focused_runtime_id(self) -> tuple[int, ...] | None:
+        try:
+            raw = self._source.focused_element()
+        except Exception:
+            return None
+        if raw is None:
+            return None
+        return UiaElementView(raw).runtime_id
+
     def _call(self, fn: Any, *args: object) -> Any:
         try:
             future = self._executor.submit(fn, *args)

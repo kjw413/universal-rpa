@@ -4,7 +4,7 @@ import ctypes
 import os
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -95,10 +95,13 @@ class _FocusPollingCapture:
         delegate: InputCapturePort,
         cache: UiaFocusCache,
         win32: PyWin32WindowFacade,
+        *,
+        focused_runtime_id: Callable[[], tuple[int, ...] | None] | None = None,
     ) -> None:
         self._delegate = delegate
         self._cache = cache
         self._win32 = win32
+        self._focused_runtime_id = focused_runtime_id or (lambda: None)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -143,7 +146,7 @@ class _FocusPollingCapture:
                 foreground_hwnd=hwnd,
                 focused_hwnd=hwnd,
                 foreground_process_id=process_id,
-                cached_uia_runtime_id=None,
+                cached_uia_runtime_id=self._safe_runtime_id(),
                 focus_event_time_ms=int(time.monotonic() * 1_000),
                 cache_generation=self._cache.next_generation(),
                 cache_confirmed=True,
@@ -151,6 +154,14 @@ class _FocusPollingCapture:
             self._cache.publish(snapshot)
         except (OSError, RuntimeError, ValueError):
             return
+
+    def _safe_runtime_id(self) -> tuple[int, ...] | None:
+        """Looked up here, on the poller thread -- never from an input hook
+        callback, which must never block on a UIA round trip."""
+        try:
+            return self._focused_runtime_id()
+        except Exception:
+            return None
 
 
 @dataclass(frozen=True, slots=True)
