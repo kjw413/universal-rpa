@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from importlib import import_module
 from typing import Any, cast
 
@@ -9,6 +10,16 @@ from universal_rpa.domain.errors import ErrorCode, RpaError
 
 from .foreground import ForegroundGuard, WindowIdentity
 from .target_resolver import ResolvedCoordinateTarget, ResolvedTarget, ResolvedUiaTarget
+
+#: How long to wait between the two clicks of a double click.
+#:
+#: Windows only pairs two clicks that are separated in time but fall inside its
+#: double-click interval, and pywinauto can produce neither end of that window:
+#: ``double_click_input`` injects both cycles in the same instant, while two
+#: ``click_input`` calls block until the whole interval has elapsed. Measured
+#: against the harness, 0 ms never registers and 30 ms always does, so this
+#: keeps margin above the floor while staying far below the ~500 ms ceiling.
+DOUBLE_CLICK_GAP_SECONDS = 0.06
 
 
 class WindowsInputDriver:
@@ -33,20 +44,58 @@ class WindowsInputDriver:
 
     def click(self, target: ResolvedTarget, button: str = "left", *, double: bool = False) -> None:
         self._guard.verify(self._identity(target))
+        if double:
+            self._double_click(target, button)
+            return
         try:
             if isinstance(target, ResolvedUiaTarget):
-                element = cast(Any, target.element)
-                if double:
-                    element.double_click_input(button=button)
-                else:
-                    element.click_input(button=button)
+                cast(Any, target.element).click_input(button=button)
                 return
             from pywinauto import mouse
 
-            if double:
-                mouse.double_click(button=button, coords=target.screen_point)
-            else:
-                mouse.click(button=button, coords=target.screen_point)
+            mouse.click(button=button, coords=target.screen_point)
+        except Exception:
+            raise RpaError(ErrorCode.ACTION_FAILED, "마우스 입력을 수행할 수 없습니다.") from None
+
+    def _double_click(self, target: ResolvedTarget, button: str) -> None:
+        """Two clicks separated by an interval Windows recognises as a pair.
+
+        Injected through Win32 rather than pywinauto because pywinauto offers
+        only the two failing extremes -- both cycles in one instant, or a
+        forced wait for the entire double-click interval -- and neither is
+        seen as a double click. Single clicks keep using pywinauto, which
+        delivers them reliably.
+        """
+
+        point = self._pointer_target(target)
+        if point is None:
+            raise RpaError(
+                ErrorCode.ACTION_FAILED, "더블클릭할 대상의 좌표를 확인할 수 없습니다."
+            )
+        try:
+            import win32api  # type: ignore[import-untyped]
+            import win32con  # type: ignore[import-untyped]
+
+            buttons = {
+                "left": (win32con.MOUSEEVENTF_LEFTDOWN, win32con.MOUSEEVENTF_LEFTUP),
+                "right": (win32con.MOUSEEVENTF_RIGHTDOWN, win32con.MOUSEEVENTF_RIGHTUP),
+                "middle": (win32con.MOUSEEVENTF_MIDDLEDOWN, win32con.MOUSEEVENTF_MIDDLEUP),
+            }
+            pressed = buttons.get(button.casefold())
+            if pressed is None:
+                raise RpaError(ErrorCode.INVALID_SCHEMA, "지원하지 않는 마우스 버튼입니다.")
+            down, up = pressed
+            win32api.SetCursorPos(point)
+            for index in range(2):
+                if index:
+                    time.sleep(DOUBLE_CLICK_GAP_SECONDS)
+                    # The pair spans real time, so the window can change under
+                    # it exactly as it can during a drag.
+                    self._guard.verify(self._identity(target))
+                win32api.mouse_event(down, 0, 0, 0, 0)
+                win32api.mouse_event(up, 0, 0, 0, 0)
+        except RpaError:
+            raise
         except Exception:
             raise RpaError(ErrorCode.ACTION_FAILED, "마우스 입력을 수행할 수 없습니다.") from None
 

@@ -9,12 +9,16 @@ over.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pytest
 
 from universal_rpa.adapters.windows.foreground import WindowIdentity
-from universal_rpa.adapters.windows.input_driver import WindowsInputDriver
+from universal_rpa.adapters.windows.input_driver import (
+    DOUBLE_CLICK_GAP_SECONDS,
+    WindowsInputDriver,
+)
 from universal_rpa.adapters.windows.target_resolver import (
     ResolvedCoordinateTarget,
     ResolvedUiaTarget,
@@ -92,6 +96,31 @@ class _SpyMouse:
         self.calls.append(("scroll", kwargs))
 
 
+class _SpyWin32Api:
+    """Records raw mouse injection, with the wall-clock gap between clicks."""
+
+    def __init__(self) -> None:
+        self.journal: list[tuple[str, Any]] = []
+        self.timeline: list[float] = []
+
+    def SetCursorPos(self, point: tuple[int, int]) -> None:
+        self.journal.append(("cursor", point))
+
+    def mouse_event(self, flag: int, *rest: int) -> None:
+        del rest
+        self.journal.append(("event", flag))
+        self.timeline.append(time.monotonic())
+
+
+class _Win32Con:
+    MOUSEEVENTF_LEFTDOWN = 0x0002
+    MOUSEEVENTF_LEFTUP = 0x0004
+    MOUSEEVENTF_RIGHTDOWN = 0x0008
+    MOUSEEVENTF_RIGHTUP = 0x0010
+    MOUSEEVENTF_MIDDLEDOWN = 0x0020
+    MOUSEEVENTF_MIDDLEUP = 0x0040
+
+
 class _SpyKeyboard:
     def __init__(self) -> None:
         #: Shared with the element under test so ordering is observable.
@@ -108,6 +137,14 @@ def mouse(monkeypatch: pytest.MonkeyPatch) -> _SpyMouse:
     module = type("_PywinautoModule", (), {"mouse": spy})
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", module)
     monkeypatch.setitem(__import__("sys").modules, "pywinauto.mouse", spy)
+    return spy
+
+
+@pytest.fixture
+def win32(monkeypatch: pytest.MonkeyPatch) -> _SpyWin32Api:
+    spy = _SpyWin32Api()
+    monkeypatch.setitem(__import__("sys").modules, "win32api", spy)
+    monkeypatch.setitem(__import__("sys").modules, "win32con", _Win32Con)
     return spy
 
 
@@ -215,6 +252,74 @@ def test_scroll_fails_closed_rather_than_scrolling_an_unknown_point(
 
     assert error.value.code is ErrorCode.ACTION_FAILED
     assert mouse.calls == []
+
+
+def test_double_click_sends_two_click_pairs_at_the_target(win32: _SpyWin32Api) -> None:
+    driver = WindowsInputDriver(_PermissiveGuard())  # type: ignore[arg-type]
+
+    driver.click(_uia_target(), "left", double=True)
+
+    assert win32.journal == [
+        ("cursor", (200, 300)),
+        ("event", _Win32Con.MOUSEEVENTF_LEFTDOWN),
+        ("event", _Win32Con.MOUSEEVENTF_LEFTUP),
+        ("event", _Win32Con.MOUSEEVENTF_LEFTDOWN),
+        ("event", _Win32Con.MOUSEEVENTF_LEFTUP),
+    ]
+
+
+def test_double_click_separates_the_pair_in_time(win32: _SpyWin32Api) -> None:
+    """Both clicks in the same instant are not recognised as a double click,
+    and pywinauto only offers that or a wait past the whole interval."""
+
+    driver = WindowsInputDriver(_PermissiveGuard())  # type: ignore[arg-type]
+
+    driver.click(_uia_target(), "left", double=True)
+
+    first_release, second_press = win32.timeline[1], win32.timeline[2]
+    assert second_press - first_release >= DOUBLE_CLICK_GAP_SECONDS
+    # Well inside the ~500 ms Windows allows between the two clicks.
+    assert DOUBLE_CLICK_GAP_SECONDS < 0.25
+
+
+def test_double_click_rechecks_the_foreground_between_the_two_clicks(
+    win32: _SpyWin32Api,
+) -> None:
+    guard = _PermissiveGuard()
+
+    WindowsInputDriver(guard).click(_uia_target(), "left", double=True)  # type: ignore[arg-type]
+
+    assert guard.verify_calls >= 2
+
+
+def test_double_click_uses_the_recorded_point_for_a_coordinate_target(
+    win32: _SpyWin32Api,
+) -> None:
+    driver = WindowsInputDriver(_PermissiveGuard())  # type: ignore[arg-type]
+
+    driver.click(_coordinate_target(), "left", double=True)
+
+    assert win32.journal[0] == ("cursor", (150, 300))
+
+
+def test_double_click_fails_closed_without_a_usable_point(win32: _SpyWin32Api) -> None:
+    driver = WindowsInputDriver(_PermissiveGuard())  # type: ignore[arg-type]
+
+    with pytest.raises(RpaError) as error:
+        driver.click(_uia_target(_Element(raises=True)), "left", double=True)
+
+    assert error.value.code is ErrorCode.ACTION_FAILED
+    assert win32.journal == []
+
+
+def test_double_click_refuses_an_unsupported_button(win32: _SpyWin32Api) -> None:
+    driver = WindowsInputDriver(_PermissiveGuard())  # type: ignore[arg-type]
+
+    with pytest.raises(RpaError) as error:
+        driver.click(_uia_target(), "x", double=True)
+
+    assert error.value.code is ErrorCode.INVALID_SCHEMA
+    assert win32.journal == []
 
 
 def test_press_key_focuses_the_addressed_element_before_sending(
