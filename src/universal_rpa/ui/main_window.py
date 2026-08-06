@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Slot
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -25,6 +26,7 @@ from universal_rpa.ui.project_home import ProjectHome
 from universal_rpa.ui.recorder_page import RecorderPage
 from universal_rpa.ui.report_page import ReportPage
 from universal_rpa.ui.runner_page import RunnerPage
+from universal_rpa.ui.target_picker import TargetPicker
 
 
 class _NoCredentialStore:
@@ -73,6 +75,7 @@ class MainWindow(QMainWindow):
             project_service=services.project_service,
             preview_store=services.preview_store,
             privacy_service=services.recording_privacy,
+            adapter_registry=services.adapter_registry,
         )
         secret_store: SecretStorePort = services.secret_store or _NoCredentialStore()
         self.runner_page = RunnerPage(
@@ -82,6 +85,13 @@ class MainWindow(QMainWindow):
             report_projector=services.report_projector,
         )
         self.report_page = ReportPage()
+        # Captured by value: a bound method here would make the child page own a
+        # reference back to this window, and that cycle outlives Qt's teardown.
+        context = services.window_context
+        request_factory = services.capture_request_factory
+        self.editor_page.target_picker_factory = lambda: TargetPicker(
+            context, request_factory=request_factory
+        )
 
         page_widgets = (
             self.project_page,
@@ -103,6 +113,13 @@ class MainWindow(QMainWindow):
         product.setObjectName("product-name")
         sidebar_layout.addWidget(product)
         sidebar_layout.addWidget(self.navigation, 1)
+
+        self.save_action = QAction("프로젝트 저장", self)
+        self.save_action.setShortcut(QKeySequence.StandardKey.Save)
+        self.save_action.setStatusTip("편집한 내용을 프로젝트 폴더에 저장합니다.")
+        self.save_action.triggered.connect(self.save_project)
+        file_menu = self.menuBar().addMenu("파일")
+        file_menu.addAction(self.save_action)
 
         central = QWidget()
         central_layout = QHBoxLayout(central)
@@ -143,32 +160,59 @@ class MainWindow(QMainWindow):
             return False
         return self.open_session(session)
 
+    def save_project(self) -> bool:
+        """Persist the open session and hand the saved workflow to every page."""
+
+        session = self.session
+        if session is None:
+            return False
+        if not session.dirty:
+            return True
+        try:
+            saved = self.services.project_service.save(session)
+        except Exception:
+            self._show_safe_error("프로젝트를 저장할 수 없습니다.")
+            return False
+        self._adopt(saved)
+        self.statusBar().showMessage(f"프로젝트를 저장했습니다: {saved.workflow.name}")
+        return True
+
+    def _resolve_unsaved_changes(self) -> bool:
+        """Ask about pending edits. False means the caller must not continue."""
+
+        session = self.session
+        if session is None or not session.dirty:
+            return True
+        choice = QMessageBox.question(
+            self,
+            "저장되지 않은 변경",
+            "현재 프로젝트 변경 내용을 저장할까요?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if choice == QMessageBox.StandardButton.Cancel:
+            return False
+        if choice == QMessageBox.StandardButton.Save:
+            return self.save_project()
+        return True
+
     @Slot(object)
     def open_session(self, session: ProjectSession) -> bool:
-        if self.session is not None and self.session.dirty:
-            choice = QMessageBox.question(
-                self,
-                "저장되지 않은 변경",
-                "현재 프로젝트 변경 내용을 저장할까요?",
-                QMessageBox.StandardButton.Save
-                | QMessageBox.StandardButton.Discard
-                | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Save,
-            )
-            if choice == QMessageBox.StandardButton.Cancel:
-                return False
-            if choice == QMessageBox.StandardButton.Save:
-                try:
-                    self.session = self.services.project_service.save(self.session)
-                except Exception:
-                    self._show_safe_error("프로젝트를 저장할 수 없습니다.")
-                    return False
+        if not self._resolve_unsaved_changes():
+            return False
+        self._adopt(session)
+        self.statusBar().showMessage(f"프로젝트 열림: {session.workflow.name}")
+        return True
+
+    def _adopt(self, session: ProjectSession) -> None:
+        """Point every page at one session so a run cannot execute a stale workflow."""
+
         self.session = session
         self.project_page.show_session(session)
         self.editor_page.set_session(session)
         self.runner_page.set_session(session)
-        self.statusBar().showMessage(f"프로젝트 열림: {session.workflow.name}")
-        return True
 
     @Slot(object)
     def _show_report(self, document: object) -> None:
@@ -186,9 +230,25 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _editor_changed(self, command: object) -> None:
         del command
-        if self.editor_page.session is not None:
-            self.session = self.editor_page.session
-            self.statusBar().showMessage("프로젝트에 저장되지 않은 변경이 있습니다.")
+        session = self.editor_page.session
+        if session is None:
+            return
+        self.session = session
+        # The Runner holds its own copy, so without this a run replays the
+        # workflow as it was opened and silently ignores every edit.
+        self.runner_page.set_session(session)
+        message = (
+            "프로젝트에 저장되지 않은 변경이 있습니다."
+            if session.dirty
+            else f"프로젝트를 저장했습니다: {session.workflow.name}"
+        )
+        self.statusBar().showMessage(message)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if not self._resolve_unsaved_changes():
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     @Slot(str)
     def _show_safe_error(self, message: str) -> None:

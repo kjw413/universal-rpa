@@ -5,6 +5,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from ctypes import wintypes
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,6 +25,7 @@ from universal_rpa.adapters.windows.screen_capture import (
     UiaPasswordRegionProbe,
     Win32ExactWindowCapture,
 )
+from universal_rpa.adapters.windows.target_request import CursorTargetRequestFactory
 from universal_rpa.adapters.windows.target_resolver import WindowsTargetResolver
 from universal_rpa.adapters.windows.uia_facade import PywinautoUiaFacade
 from universal_rpa.adapters.windows.window_catalog import PyWin32WindowFacade, Win32WindowCatalog
@@ -52,6 +54,7 @@ from universal_rpa.infrastructure.recording_store import JsonlRecordingStore, Re
 from universal_rpa.infrastructure.screenshots import FailureScreenshotService
 from universal_rpa.infrastructure.sensitive_regions import SensitiveRegionProvider
 from universal_rpa.infrastructure.target_preview_store import TargetPreviewStore
+from universal_rpa.ports.automation import TargetCaptureRequest
 from universal_rpa.ports.capture import ControlSink, InputCapturePort, InputEventSink
 from universal_rpa.ports.context import WindowContextPort
 from universal_rpa.ports.credentials import SecretStorePort
@@ -168,10 +171,28 @@ class AppServices:
     report_projector: ReportProjector = field(default_factory=ReportProjector)
     artifact_store: RunArtifactStore | None = None
     secret_store: SecretStorePort | None = None
+    capture_request_factory: Callable[[], TargetCaptureRequest] | None = None
     startup_warnings: tuple[str, ...] = ()
 
 
-def _production_recording_boundaries() -> tuple[InputCapturePort, WindowContextPort]:
+def _cursor_position() -> tuple[int, int]:
+    point = wintypes.POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
+    return int(point.x), int(point.y)
+
+
+def _window_from_point(screen_x: int, screen_y: int) -> int:
+    user32 = ctypes.windll.user32
+    user32.WindowFromPoint.argtypes = [wintypes.POINT]
+    user32.WindowFromPoint.restype = ctypes.c_void_p
+    return int(user32.WindowFromPoint(wintypes.POINT(screen_x, screen_y)) or 0)
+
+
+def _production_recording_boundaries() -> tuple[
+    InputCapturePort,
+    WindowContextPort,
+    Callable[[], TargetCaptureRequest],
+]:
     win32 = PyWin32WindowFacade()
     initial = EventFocusSnapshot(
         foreground_hwnd=0,
@@ -197,7 +218,14 @@ def _production_recording_boundaries() -> tuple[InputCapturePort, WindowContextP
         win32,
         focused_runtime_id=facade.focused_runtime_id,
     )
-    return capture, context
+    request_factory = CursorTargetRequestFactory(
+        probe=WindowsEnvironmentProbe(),
+        cursor_position=_cursor_position,
+        window_from_point=_window_from_point,
+        top_level_window=win32.top_level_window,
+        focused_runtime_id=facade.focused_runtime_id,
+    )
+    return capture, context, request_factory
 
 
 def build_services(
@@ -234,8 +262,9 @@ def build_services(
 
     if (capture is None) != (window_context is None):
         raise ValueError("capture and window_context must be supplied together")
+    capture_request_factory: Callable[[], TargetCaptureRequest] | None = None
     if capture is None or window_context is None:
-        capture, window_context = _production_recording_boundaries()
+        capture, window_context, capture_request_factory = _production_recording_boundaries()
 
     run_root = _run_artifact_root(local_app_data)
     pruner = artifact_retention
@@ -318,6 +347,7 @@ def build_services(
         report_projector=projector,
         artifact_store=artifact_store,
         secret_store=secret_store,
+        capture_request_factory=capture_request_factory,
         startup_warnings=tuple(warnings),
     )
 

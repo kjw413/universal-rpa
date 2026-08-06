@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from uuid import UUID
 
 from PySide6.QtCore import Signal
@@ -21,6 +22,7 @@ from universal_rpa.application.editing import (
     RenameStep,
     SetStepValue,
 )
+from universal_rpa.domain.conditions import AssertionSpec
 from universal_rpa.domain.values import (
     LiteralValue,
     RowBindingValue,
@@ -29,7 +31,9 @@ from universal_rpa.domain.values import (
     VariableValue,
 )
 from universal_rpa.domain.workflow import ActionStep, Step
+from universal_rpa.ports.automation import AdapterDescriptor
 from universal_rpa.ui.action_parameter_editor import ActionParameterEditor
+from universal_rpa.ui.wait_assertion_editor import WaitAssertionEditor
 
 _MODE_LABELS = {
     "literal": "고정값",
@@ -48,6 +52,7 @@ class PropertyPanel(QWidget):
         self.step_id: UUID | None = None
         self._step: Step | None = None
         self._credential_ref: str | None = None
+        self._descriptors: dict[str, AdapterDescriptor] = {}
         self.label_input = QLineEdit()
         self.enabled_check = QCheckBox("실행")
         self.action_label = QLabel("-")
@@ -60,6 +65,7 @@ class PropertyPanel(QWidget):
         self.retry_count = QSpinBox()
         self.retry_count.setRange(0, 3)
         self.action_parameter_editor = ActionParameterEditor()
+        self.wait_editor = WaitAssertionEditor()
         self.error_label = QLabel()
         self.error_label.setWordWrap(True)
         self.apply_button = QPushButton("변경 적용")
@@ -76,6 +82,7 @@ class PropertyPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(self.action_parameter_editor)
+        layout.addWidget(self.wait_editor)
         layout.addWidget(self.error_label)
         layout.addWidget(self.apply_button)
         layout.addStretch(1)
@@ -83,6 +90,29 @@ class PropertyPanel(QWidget):
         self.mode_combo.currentTextChanged.connect(self._mode_changed)
         self.apply_button.clicked.connect(self._emit_pending)
         self.set_step(None)
+
+    def set_adapter_descriptors(self, descriptors: Mapping[str, AdapterDescriptor]) -> None:
+        """Supply what each adapter can wait for, so only real conditions appear."""
+
+        self._descriptors = dict(descriptors)
+        self._refresh_wait_editor(self._step)
+
+    def adapter_descriptors(self) -> Mapping[str, AdapterDescriptor]:
+        return dict(self._descriptors)
+
+    def _refresh_wait_editor(self, step: Step | None) -> None:
+        if not isinstance(step, ActionStep):
+            self.wait_editor.setEnabled(False)
+            return
+        descriptor = self._descriptors.get(step.action_type.split(".", 1)[0])
+        self.wait_editor.setEnabled(descriptor is not None)
+        if descriptor is None:
+            return
+        self.wait_editor.set_action(descriptor, step.action_type)
+        self.wait_editor.set_wait(step.wait)
+        self.wait_editor.set_assertions(
+            tuple(item for item in step.assertions if isinstance(item, AssertionSpec))
+        )
 
     def set_step(self, step: Step | None) -> None:
         self._step = step
@@ -127,6 +157,7 @@ class PropertyPanel(QWidget):
         self.failure_combo.setCurrentText(step.failure_policy.mode)
         self.retry_count.setValue(step.failure_policy.retry_count)
         self.action_parameter_editor.set_action(step.action_type, step.parameters)
+        self._refresh_wait_editor(step)
         self.error_label.clear()
 
     def select_credential_reference(self, reference: str) -> None:
@@ -184,6 +215,12 @@ class PropertyPanel(QWidget):
                     if self.failure_combo.currentText() == "retry"
                     else 0,
                 }
+            wait = self.wait_editor.pending_wait(step.target)
+            if wait != step.wait:
+                changes["wait"] = wait
+            assertions = self.wait_editor.pending_assertions()
+            if assertions != step.assertions:
+                changes["assertions"] = assertions
             if changes:
                 return PatchActionStep(step.step_id, changes)
         if label != step.label:

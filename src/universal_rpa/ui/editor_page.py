@@ -5,6 +5,8 @@ from uuid import UUID
 
 from PySide6.QtCore import QModelIndex, Signal, Slot
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
     QHBoxLayout,
     QPushButton,
     QSplitter,
@@ -13,11 +15,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from universal_rpa.adapters.registry import AdapterRegistry
 from universal_rpa.application.editing import (
     EditRejected,
     ReplaceTarget,
     SetStepValue,
+    UpsertDataSource,
+    UpsertVariable,
     WorkflowEditingService,
+    WrapInLoop,
 )
 from universal_rpa.application.normalization import NormalizationResult
 from universal_rpa.application.projects import ProjectService, ProjectSession
@@ -32,6 +38,7 @@ from universal_rpa.infrastructure.target_preview_store import (
 )
 from universal_rpa.ports.automation import TargetCaptureResult
 from universal_rpa.ui.json_inspector import JsonInspector
+from universal_rpa.ui.loop_dialog import LoopDialog
 from universal_rpa.ui.property_panel import PropertyPanel
 from universal_rpa.ui.step_tree_model import WorkflowTreeModel
 from universal_rpa.ui.target_picker import TargetPicker
@@ -40,6 +47,7 @@ from universal_rpa.ui.target_preview import (
     TargetPreview,
     TargetPreviewResolver,
 )
+from universal_rpa.ui.variable_dialog import VariableDialog
 
 
 class ProjectSaveFailed(RuntimeError):
@@ -61,6 +69,7 @@ class WorkflowEditor(QWidget):
         project_service: ProjectService | None = None,
         preview_store: TargetPreviewStore | None = None,
         privacy_service: RecordingPrivacyService | None = None,
+        adapter_registry: AdapterRegistry | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -72,13 +81,22 @@ class WorkflowEditor(QWidget):
         self._source_session_ids: tuple[UUID, ...] = ()
         self.session: ProjectSession | None = None
         self.target_picker_factory: Callable[[], TargetPicker] | None = None
+        self.variable_dialog_factory: Callable[[], VariableDialog] = VariableDialog
+        self.loop_dialog_factory: Callable[[], LoopDialog] = LoopDialog
         self.tree_model = WorkflowTreeModel()
         self.tree_view = QTreeView()
         self.tree_view.setModel(self.tree_model)
         self.tree_view.setHeaderHidden(True)
+        # A loop normally covers several consecutive steps, so the tree has to
+        # let the user pick more than one.
+        self.tree_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         resolver = preview_store or preview_resolver or MissingTargetPreviewResolver()
         self.target_preview = TargetPreview(resolver)
         self.property_panel = PropertyPanel()
+        if adapter_registry is not None:
+            self.property_panel.set_adapter_descriptors(
+                {descriptor.adapter_id: descriptor for descriptor in adapter_registry.descriptors()}
+            )
         self.json_inspector = JsonInspector(self)
 
         self.json_button = QPushButton("JSON 보기")
@@ -86,11 +104,15 @@ class WorkflowEditor(QWidget):
         self.test_button = QPushButton("선택 단계 테스트")
         self.test_button.setEnabled(False)
         self.validation_button = QPushButton("환경 검사")
+        self.variable_button = QPushButton("실행 변수 추가")
+        self.loop_button = QPushButton("선택 단계 반복 만들기")
         buttons = QHBoxLayout()
         buttons.addWidget(self.json_button)
         buttons.addWidget(self.retarget_button)
         buttons.addWidget(self.test_button)
         buttons.addWidget(self.validation_button)
+        buttons.addWidget(self.variable_button)
+        buttons.addWidget(self.loop_button)
         buttons.addStretch(1)
 
         splitter = QSplitter()
@@ -112,6 +134,8 @@ class WorkflowEditor(QWidget):
         self.retarget_button.clicked.connect(self.retarget_selected_step)
         self.test_button.clicked.connect(self._request_step_test)
         self.validation_button.clicked.connect(self.validate_requested)
+        self.variable_button.clicked.connect(self.add_variable)
+        self.loop_button.clicked.connect(self.wrap_selection_in_loop)
 
     def set_session(self, session: ProjectSession) -> None:
         self.session = session
@@ -250,6 +274,67 @@ class WorkflowEditor(QWidget):
         label = labels.get(mode)
         if label is not None:
             self.property_panel.mode_combo.setCurrentText(label)
+
+    @Slot()
+    def add_variable(self) -> None:
+        """Define a run variable so a step's value can change per run."""
+
+        if self.session is None:
+            return
+        dialog = self.variable_dialog_factory()
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        variable = dialog.variable_definition()
+        if variable is None:
+            return
+        self.apply_command(UpsertVariable(variable))
+
+    @Slot()
+    def wrap_selection_in_loop(self) -> None:
+        """Repeat the selected steps once per row of a data source."""
+
+        step_ids = self.selected_step_ids()
+        if self.session is None or not step_ids:
+            return
+        dialog = self.loop_dialog_factory()
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        data_source = dialog.data_source()
+        if data_source is None:
+            return
+        # The source has to exist before the loop names it, so this is two
+        # commands: a rejected wrap must not leave an orphan source behind.
+        if not self.apply_command(UpsertDataSource(data_source)):
+            return
+        if not self.apply_command(
+            WrapInLoop(step_ids, data_source.data_source_id, dialog.loop_label())
+        ):
+            self._rollback_data_source(data_source.data_source_id)
+
+    def selected_step_ids(self) -> tuple[UUID, ...]:
+        found: list[UUID] = []
+        for index in self.tree_view.selectionModel().selectedIndexes():
+            step_id = self.tree_model.step_id(index)
+            if step_id is not None and step_id not in found:
+                found.append(step_id)
+        return tuple(found)
+
+    def _rollback_data_source(self, data_source_id: str) -> None:
+        session = self.session
+        if session is None:
+            return
+        remaining = tuple(
+            source
+            for source in session.workflow.data_sources
+            if source.data_source_id != data_source_id
+        )
+        self.session = ProjectSession(
+            project_dir=session.project_dir,
+            workflow=session.workflow.model_copy(update={"data_sources": remaining}),
+            loaded_revision=session.loaded_revision,
+            dirty=session.dirty,
+        )
+        self._refresh_workflow(selected_step_id=None)
 
     @Slot()
     def retarget_selected_step(self) -> None:

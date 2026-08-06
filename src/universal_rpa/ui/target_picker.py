@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, QTimer
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -67,13 +69,29 @@ class SensitiveRegionEditor(QListWidget):
 
 
 class TargetPicker(QDialog):
-    def __init__(self, capture_port: TargetCapturePort | None = None) -> None:
+    def __init__(
+        self,
+        capture_port: TargetCapturePort | None = None,
+        *,
+        request_factory: Callable[[], TargetCaptureRequest] | None = None,
+        countdown_seconds: int = 3,
+    ) -> None:
         super().__init__()
         self.setWindowTitle("대상과 미리보기 다시 캡처")
         self._capture_port = capture_port
+        self._request_factory = request_factory
+        self._countdown_seconds = max(0, countdown_seconds)
+        self._remaining = 0
+        # The dialog is modal, so the user cannot point at the target while it
+        # has focus. The countdown gives them time to move the mouse onto the
+        # control before the position is read.
+        self._countdown = QTimer(self)
+        self._countdown.setInterval(1_000)
+        self._countdown.timeout.connect(self._tick)
         self._capture_result: TargetCaptureResult | None = None
         self._selected_target: TargetSpec | None = None
         self._thread: QThread | None = None
+        self._worker: FunctionWorker | None = None
         self._token: CancellationToken | None = None
         self.candidate_combo = QComboBox()
         self.status_label = QLabel("캡처할 화면 위치를 선택하세요.")
@@ -85,12 +103,51 @@ class TargetPicker(QDialog):
         self.buttons.accepted.connect(self._accept_if_complete)
         self.buttons.rejected.connect(self.reject)
         self.candidate_combo.currentIndexChanged.connect(self._candidate_changed)
+        self.capture_button.clicked.connect(self.begin_capture)
         layout = QVBoxLayout(self)
         layout.addWidget(self.status_label)
         layout.addWidget(self.candidate_combo)
         layout.addWidget(self.region_editor)
         layout.addWidget(self.capture_button)
         layout.addWidget(self.buttons)
+
+    @property
+    def capture_port(self) -> TargetCapturePort | None:
+        return self._capture_port
+
+    def begin_capture(self) -> None:
+        """Count the user down, then capture whatever they are pointing at."""
+
+        if self._request_factory is None or self._thread is not None:
+            return
+        self.capture_button.setEnabled(False)
+        self._remaining = self._countdown_seconds
+        if self._remaining == 0:
+            self._capture_now()
+            return
+        self.status_label.setText(f"{self._remaining}초 후 마우스 위치를 캡처합니다.")
+        self._countdown.start()
+
+    def _tick(self) -> None:
+        self._remaining -= 1
+        if self._remaining > 0:
+            self.status_label.setText(f"{self._remaining}초 후 마우스 위치를 캡처합니다.")
+            return
+        self._countdown.stop()
+        self._capture_now()
+
+    def _capture_now(self) -> None:
+        factory = self._request_factory
+        if factory is None:
+            return
+        try:
+            request = factory()
+        except Exception:
+            self.capture_button.setEnabled(True)
+            self.status_label.setText("현재 화면 상태를 읽을 수 없습니다.")
+            return
+        self.status_label.setText("대상을 확인하는 중입니다…")
+        self.start_capture(request)
 
     def start_capture(self, request: TargetCaptureRequest) -> None:
         if self._capture_port is None or self._thread is not None:
@@ -105,6 +162,10 @@ class TargetPicker(QDialog):
         worker.finished.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(self._thread_finished)
+        # A worker moved onto a QThread has no parent, so this dialog must hold
+        # the only strong reference until the thread finishes; otherwise Python
+        # collects it and the queued capture never runs.
+        self._worker = worker
         self._thread = thread
         self._token = token
         thread.start()
@@ -199,7 +260,27 @@ class TargetPicker(QDialog):
 
     def _thread_finished(self) -> None:
         self._thread = None
+        self._worker = None
         self._token = None
+        self.capture_button.setEnabled(True)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Never let the dialog outlive its capture thread.
+
+        The thread is parented to this dialog, so Qt aborts the process if the
+        dialog is destroyed while it still runs.
+        """
+
+        self._countdown.stop()
+        if self._token is not None:
+            self._token.cancel()
+        thread = self._thread
+        if thread is not None and thread.isRunning():
+            thread.quit()
+            thread.wait(2_000)
+        self._thread = None
+        self._worker = None
+        super().closeEvent(event)
 
 
 __all__ = ["SensitiveRegionEditor", "TargetPicker"]
