@@ -1,8 +1,7 @@
 # Universal RPA Studio
 
-Universal RPA Studio is a deterministic local Windows RPA Studio.
+이 프로그램은 사용자의 반복 작업의 패턴을 문서화하여 자동화하는 RPA 스튜디오입니다.
 
-It supports Windows 10/11 x64 in an interactive, unlocked desktop session. It does not
-bypass UAC, MFA, or CAPTCHA protections, and it has no runtime LLM dependency.
+./docs/사용설명서.md 에 실행환경 구축, 빌드, 프로그램 사용, 오류 대처 등에 대한 가이드가 있으니 참고하시기 바랍니다.
 
-Run all installation, test, lint, and type-check commands from this directory.
+기본적으로 화면 좌표 기반이므로, UI 구조 변경이 잦은 화면 위에서의 작업에는 적합하지 않습니다.
